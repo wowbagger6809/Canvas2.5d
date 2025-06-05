@@ -1,0 +1,211 @@
+== Defined Procedures ==
+//abbrev
+//anchorpos
+//reflect
+//reconf
+//rgb
+//view
+//loadfont-qfnt
+//loadfont-txf
+//loadfont-ttf
+//parsetexfont-qfnt
+//parsetexfont-txf
+//readfontfile
+//separgs
+/bindcallback
+/bindcurrent
+/bindinit
+/bbox
+/cleanup
+/dataclick
+/enlarge
+/Events
+/expr
+/exprrun
+/intersects
+/keypress
+/maketexturefromtexfont
+/not
+/rgb (from primatives.qgl, distinct from canvasfunc.tk's)
+/rebuild
+/restoreZ
+/search
+/setup
+/setupdefaults
+/tagid
+/tagset
+/toglcreate
+/togldisplay
+/toglreshape
+/union
+/unique
+/zerobase
+/zerobase3
+/~
+/~=
+/~?
+-bg (alias)
+-height
+-scrollregion
+-width
+-yscrollcommand
+Font/height
+Font/load (texfont.tk)
+Font/substr
+Font/texcoords
+Font/txt2path
+Font/vertices
+Font/width
+RenderCharBack
+RenderCharBackFront
+RenderCharFront
+RenderGlyph
+RenderString
+Scene/bind
+Scene/Bindings
+TestAlpha
+TestRotate
+Text2Path
+XXXscale/notpossible
+_k
+addtag
+alias
+alpha/start
+alpha/stop
+argsproc
+atag
+bbox
+bbox/coords
+bboxScanV
+bind (from bind.tk)
+bind/scan
+canvasgl
+canvasglX
+canvasx
+canvasy
+cc (alias)
+cget
+cnorm
+cnormr
+cnormv
+cnormvv
+composite (primatives.qgl)
+configure
+coords
+create
+cube (primatives.qgl)
+define
+delete
+dlist
+dtag
+editstate
+event
+extend
+find
+font
+fontfile
+fontmetric
+getdlist
+gettags
+glGet/
+glenviron
+glquery
+group (primatives.qgl)
+idleupdate
+image (primatives.qgl)
+itemcget
+itemconfigure
+itemconfv
+lAdd
+lDel
+lRev
+line (primatives.qgl)
+lines (primatives.qgl)
+load
+lower
+makecurrent
+maketexturefromimage
+move
+normal
+oval (primatives.qgl)
+pickBBox
+pickBBoxX
+pickHits
+pickObject
+points (primatives.qgl)
+polygon (primatives.qgl)
+postscript
+primative (alias)
+primatives::Colour
+primatives::Colourv
+primatives::Disable
+primatives::Enable
+primatives::MTexCoord
+primatives::MTexCoordv
+primatives::MTexture
+primatives::Matrix
+primatives::Push
+primatives::Rotate
+primatives::SelectFont
+primatives::Shape
+primatives::TexCoord
+primatives::TexCoordv
+primatives::Texture
+primatives::Translate
+primatives::Vertex
+primatives::arc
+primatives::ball
+primatives::blob
+primatives::box
+primatives::center
+primatives::chain
+primatives::cylinder
+primatives::disk
+primatives::plane
+primatives::pyramid
+primatives::rectangle
+primatives::ring
+primatives::rod
+primatives::teapot
+primatives::text
+q (alias)
+qfont/save
+raise
+range
+register
+render
+rlevel
+rotate
+scale
+tex/fmt
+tex/scale
+teximage
+textureconfigure
+textureinfo
+test/start
+test/stop
+togl
+translate
+txfAdj
+txfTM
+type
+updcurrent
+userargs
+value
+vlist
+vlist/subst
+vlist/update
+vTrace
+x (texfont.tk)
+xprod
+xview (alias)
+yview (alias)
+
+== Potentially Missing Procedures (Excluding OpenGL/Tcl3D) ==
+Shape/Bindings (called in userargs.tk, but seems to be a typo for Scene/Bindings)
+Shape/_eval (called in primatives.qgl from shape proc)
+View (called in bindings.tk, e.g. View %W update)
+delete_GLint (called in /cleanup, but should be filtered if new_GLint is)
+makePath (called in texfont.tk)
+primative (this is an alias, but if used as `primative $type ...` and `primative` itself is not a proc, could be flagged if alias resolution isn't perfect in the call detection)
+(If the list were truly empty, it would say: (None found))

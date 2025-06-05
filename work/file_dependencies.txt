@@ -1,0 +1,50 @@
+# Analysis based on the content of qCanvas.tcl and other specified .tk/.qgl files.
+
+qCanvas.tcl sources:
+  # Via `foreach f [glob $Home/*.qgl]` where $Home is [file dirname [info script]]:
+  primatives.qgl
+
+  # Via `foreach f [glob *.tk]` where $Home is [file dirname [info script]]:
+  # This sources all .tk files in the same directory as qCanvas.tcl.
+  bind.tk
+  bindings.tk
+  canvasfunc.tk
+  defview.tk
+  dlists.tk
+  font.tk
+  ftgl.tk
+  pick.tk
+  qCanvas.tcl # (self-sourced due to `glob *.tk`)
+  tags.tk
+  texfont.tk
+  texture.tk
+  userargs.tk
+  util.tk
+  vlist.tk
+
+  # Via explicit `namespace inscope primatives source $Home/primatives.qgl`:
+  # This is redundant if primatives.qgl is already caught by the .qgl glob.
+  primatives.qgl # (listed again for completeness based on source code line)
+
+# Dependencies of other files:
+# Based on reading their content, the following files do NOT source any other files:
+bind.tk sources: (none)
+bindings.tk sources: (none)
+canvasfunc.tk sources: (none)
+defview.tk sources: (none)
+dlists.tk sources: (none)
+font.tk sources: (none)
+ftgl.tk sources: (none)
+pick.tk sources: (none)
+primatives.qgl sources: (none)
+tags.tk sources: (none)
+texfont.tk sources: (none)
+texture.tk sources: (none)
+userargs.tk sources: (none)
+util.tk sources: (none)
+vlist.tk sources: (none)
+
+# Summary:
+# qCanvas.tcl is the central script that loads all other .tk and .qgl modules
+# found in its directory. The modules themselves are self-contained in terms
+# of Tcl `source` dependencies.
