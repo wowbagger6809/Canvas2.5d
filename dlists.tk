@@ -1,0 +1,121 @@
+#
+# Dlist Stacks and Global Names
+#
+# © Philip Quaife 2005,2007
+#
+# Qanim, QCanvas2.5D
+
+
+# GL uses integers for NAMES. We want to use Names.
+
+
+proc /~ {path name} {
+	upvar [nc]::$path/togl canvas
+	if {[string is integer $name]} {return $name}
+	catch {unset canvas(dlist,$name)}
+}
+
+proc ~ {path name {define 0}} {
+	upvar [nc]::$path/togl canvas
+
+#puts "DL ~ $path $name $define"
+	if {[string is integer $name]} {return $name}
+	if {$define && ! [info exists canvas(dlist,$name)] } {
+		set canvas(dlist,$name) [dlist $path alloc 1]
+	}
+	set canvas(dlist,$name)
+}
+proc ~= {path name {define 0}} {~ $path $name 1}
+
+proc ~? {path name} {
+	upvar [nc]::$path/togl canvas
+	info exists canvas(dlist,$name)
+}
+
+proc /unique {} {
+	variable unique
+	set unique 0
+	proc /unique {} {variable unique ; incr unique}
+	/unique
+}
+
+proc define {path list cmds} {
+	upvar [nc]::$path/togl canvas
+	$path/togl makecurrent
+	glNewList [set dl [~ $path $list]] GL_COMPILE
+	if {[catch {uplevel 1 $cmds} err]} {
+		glEnd
+		glEndList
+		glGetError
+		glNewList $dl GL_COMPILE
+		glEndList
+		return -code error -errorinfo "$err $::errorInfo [glGetError]" "$path define: error processing commands for $list"
+	}
+	glEndList
+}
+
+#
+# Manage Display List stack.
+# zero based
+#
+
+proc dlist {path cmd args} {
+	upvar [nc]::$path/togl canvas
+
+#	puts "DLIST alloc $path"
+	switch $cmd {
+		alloc {
+			set size [lindex $args 0]
+			if {[info exists canvas(dlist,$size] } {
+				set start [lindex $canvas(dlist,free) 0]
+				set canvas(dlist,$size) [lrange $canvas(dlist,$size) 1 end]
+				if {! [llength $canvas(dlist,$size)] } {
+					unset canvas(dlist,$size)
+				}
+				set canvas(dlist,size,$start) $size
+				return $start
+			}
+			$path/togl makecurrent
+			set start [glGenLists $size]
+			set canvas(dlist,size,$start) $size
+			return $start
+		}
+		free {
+			set start [lindex $args 0]
+			if {! [info exists canvas(dlist,size,$start)] } {
+				puts "Attempt to free non allocated dlist"
+				return 0
+			}
+			lappend canvas(dlist,$canvas(dlist,size,$start)) $start
+			unset canvas(dlist,size,$start)
+			return 1
+		}
+		reallyfree -
+		freeall {
+			puts "Freeall and reallyfree not implimented"
+			return 0
+			foreach {key freelist} [array get DList free,*] {
+				foreach start $freelist {
+					glDeleteLists $start [lindex [split $key ,] 1]
+				}
+				unset DList($key)
+			}
+			foreach {key size} [array get DList size,*] {
+				glDeleteLists [lindex [split $key ,] 1] $size
+			}
+			array unset DList size,*
+			array unset DList free,*
+			return 1
+		}
+		default {
+			error "DList unknown command $cmd, use alloc or free"
+		}
+	}
+	list
+}
+
+
+
+
+
+

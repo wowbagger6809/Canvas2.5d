@@ -1,0 +1,48 @@
+#
+# © Philip Quaife 2005
+#
+# Routines to make Textured text quads
+#
+# QCanvas2d - Text routines
+#
+
+proc font {path fontname fontsize fontface} {
+	upvar [nc]::$path/togl canvas
+	variable Home
+
+	foreach type $canvas(fonttypes)  {
+		if {[set ret [//loadfont-$type $path $fontname $fontsize $fontface]] ne {} } {
+			lAdd canvas(fonts) $fontname-$fontsize-$fontface
+			return $ret
+		}
+	}
+	return {}
+}
+
+proc fontmetric {path fontname} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/[join $fontname -] font
+	list $font(hdr,maxw) $font(hdr,maxh) $font(hdr,scale) $font(hdr,ascent) $font(hdr,descent)
+}
+
+proc fontfile {path fontfile} {
+	upvar [nc]::$path/togl canvas
+
+	foreach dir $canvas(fontpath) {
+		if {[file exists [set file [file join $dir $fontfile]]]} {
+			return $file
+		}
+	}
+	return {}
+}
+
+proc //readfontfile {file} {
+	set f [open $file r]
+	fconfigure $f -translation binary
+	set data [read $f]
+	close $f
+	set data
+}
+
+
+

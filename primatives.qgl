@@ -1,0 +1,844 @@
+#
+# © Philip Quaife 2005
+#
+# Routines generating primatives for use in shape definitions.
+#
+# For QCanvas2D - Qanim - QMines -QBattleships
+#
+#
+
+## FIX ME: pass options array so primative has direct access
+##  to all item options without relying on \[$path itemcget ...\]
+
+proc /rgb {clist args} {
+	set colours [list]
+	foreach c $clist {
+	 set rgb [list]
+	 foreach c  [winfo rgb . $c] {
+		lappend rgb [expr {$c / 65535.0}]
+	 }
+	 if {[llength $args]} {set rgb [concat $rgb $args]}
+	 lappend colours $rgb
+	}
+	set colours
+}
+
+proc /zerobase {coords} {
+
+	foreach {x1 y1 x2 y2} $coords {break}
+
+	set h2 [expr {($y2 - $y1)/2.0}]
+	set w2 [expr {($x2 - $x1)/2.0}]
+
+	list [expr {$x1 - $w2}] [expr {$y1 - $h2}] \
+		 [expr {$x2 - $w2}] [expr {$y2 - $h2}]
+}
+
+proc /zerobase3 {coords} {
+
+	foreach {x1 y1 z1 x2 y2 z2} $coords {break}
+
+	set h2 [expr {($y2 - $y1)/2.0}]
+	set w2 [expr {($x2 - $x1)/2.0}]
+	set z2 [expr {($z2 - $z1)/2.0}]
+
+	list [expr {$x1 - $w2}] [expr {$y1 - $h2}] [expr {$z1 - $z2}] \
+		 [expr {$x2 - $w2}] [expr {$y2 - $h2}] [expr {$z1 - $z2}] 
+}
+
+
+proc rectangle {path id coords } {
+	foreach {x1 y1 x2 y2} $coords {break}
+	set w [expr {$x2 - $x1}]
+	set h [expr {$y2 - $y1}]
+	set fill [/rgb [$path itemcget $id -fill] [$path itemcget $id -alpha] ]
+	set outline [$path itemcget $id -outline]
+	glScalef $w $h 1
+	set idx -1
+
+	if {$x1 == $x2 && $y1 == $y2} {
+		glBegin GL_POINTS
+		  glVertex3f $x1 $y1 0
+		glEnd
+		return $coords
+	}
+	if {[set tex [$path itemcget $id -gltexture]] ne {} } {
+		glActiveTexture GL_TEXTURE0
+		glEnable GL_TEXTURE_2D
+		glCallList [$path ~ $tex]
+	}
+	if {[llength $fill] } {
+	 glBegin GL_QUADS
+		glNormal3f 0 0 1
+		set c [lindex $fill [incr idx]]
+		if {$c ne {} && $c ne {-} } {
+			glColor4fv $c
+		}
+ 		glTexCoord2d 0 0
+		glVertex3f -0.5 -0.5 0
+
+		set c [lindex $fill [incr idx]]
+		if {$c ne {} && $c ne {-} } {
+		  glColor4fv $c
+		}
+		glTexCoord2d 1 0
+		glVertex3f  0.5 -0.5 0
+
+		set c [lindex $fill [incr idx]]
+		if {$c ne {} && $c ne {-} } {
+		  glColor4fv $c
+		}
+		glTexCoord2d 1 1
+		glVertex3f  0.5  0.5 0
+
+		set c [lindex $fill [incr idx]]
+		if {$c ne {} && $c ne {-} } {
+		  glColor4fv $c
+		}
+		glTexCoord2d 0 1
+		glVertex3f -0.5  0.5 0
+	 glEnd
+	}
+	if {[llength $outline] } {
+	 glColor4fv [lindex  [/rgb $outline [$path itemcget $id -alpha]] 0]
+	 glLineWidth [$path itemcget $id -width]
+	 glBegin GL_LINE_LOOP
+		glNormal3f 0 0 1
+		glTexCoord2d 0 0
+		glVertex3f -0.5 -0.5 0
+		glTexCoord2d 1 0
+		glVertex3f  0.5 -0.5 0
+		glTexCoord2d 1 1
+		glVertex3f  0.5  0.5 0
+		glTexCoord2d 0 1
+		glVertex3f -0.5  0.5 0
+	 glEnd
+	}
+	if {$tex ne {} } {
+	    glCallList  [$path ~ NOTEXTURE]
+		glBindTexture GL_TEXTURE_2D 0
+		glDisable GL_TEXTURE_2D
+	}
+
+	/zerobase $coords
+}
+
+proc oval {path id coords} {
+
+	foreach {x1 y1 x2 y2} $coords {break}
+	set w [expr {$x2 - $x1}]
+	set h [expr {$y2 - $y1}]
+	set x [gluNewQuadric]
+	set lwidth [$path itemcget $id -width]
+	set fill [$path itemcget $id -fill]
+	set outline [$path itemcget $id -outline]
+	glScaled [expr {$w / 2.0}] [expr {$h/2.0}] 1
+	if {[llength $fill]} {
+		gluDisk $x 0 1 64 64
+	}
+	if {[llength $outline]} {
+	  glColor4fv [lindex [/rgb $outline [$path itemcget $id -alpha]] 0]
+	  set hole [expr {1.0 - double($lwidth)*2.0 / pow($w *$w + $h * $h,0.5)}]
+	  gluDisk $x $hole 1 64 64
+	}
+    gluDeleteQuadric $x
+
+	/zerobase $coords
+}
+
+# FIX ME 
+# it is probabbly better to draw the arc our selves
+# using lines or triangles 
+# do avoid the artifacts and problems with line widths
+#
+# Chords can be done with a clipping plane and a pie slice
+# 
+proc arc {path id coords} {
+	foreach {x1 y1 x2 y2} $coords {break}
+	set w [expr {$x2 - $x1}]
+	set h [expr {$y2 - $y1}]
+	set start [$path itemcget $id -start]
+	set extent [$path itemcget $id -extent]
+	set type [$path itemcget $id -style]
+	set lwidth [$path itemcget $id -width]
+	set fill [$path itemcget $id -fill]
+	set outline [$path itemcget $id -outline]
+	set start [expr {($start + 90) % 360}]
+	if {$type eq {arc} } {
+		set hole [expr {1.0 - double($lwidth)*2.0 / pow($w *$w + $h * $h,0.5)}]
+		if {$hole < 0} {set hole 0}
+	} else {
+		set hole 0
+	}
+	set x [gluNewQuadric] 
+	gluQuadricDrawStyle $x	GLU_FILL
+	glPushMatrix
+	glLineWidth $lwidth
+	glScaled [expr {$w / 2.0}] [expr {$h/2.0}] 1
+	if {$type eq {chord}} {
+	  glEnable GL_CLIP_PLANE0
+	  glPushMatrix
+	  glRotatef [expr {$start+90}] 0 0 1
+	  ### FIXME compute plane equation for a given angle!
+	  glTranslatef 0 [expr {$w/2}] 0
+	  #glClipPlane GL_CLIP_PLANE0 {0 1 0 0}
+	  glPopMatrix
+	}
+	if {$type eq {arc} } {
+	    glColor4fv [lindex [/rgb $outline [$path itemcget $id -alpha]] 0]
+	}
+	if {[llength $fill] || $type eq {arc} } {
+		gluPartialDisk $x $hole 1 32 32 $start $extent
+	}
+	if {[llength $outline] && $type ne {arc} } {
+	  set hole [expr {1.0 - double($lwidth)*2.0 / pow($w *$w + $h * $h,0.5)}]
+	  glColor4fv [lindex [/rgb $outline [$path itemcget $id -alpha]] 0]
+	  gluPartialDisk $x $hole 1 32 32 $start $extent
+	  glRotatef [expr {$start-90}] 0 0 -1
+	  glBegin GL_LINES
+		glVertex3f 1 0 0
+		glVertex3f 0 0 0
+	  glEnd
+	  glRotatef [expr {$extent}] 0 0 -1
+	  glBegin GL_LINES
+		glVertex3f 0 0 0
+		glVertex3f 1 0 0
+	  glEnd
+	}
+	glDisable GL_CLIP_PLANE0
+    gluDeleteQuadric $x
+	glPopMatrix
+	/zerobase $coords
+}
+
+proc image {path id coords}  {
+
+	set image [$path itemcget $id -image]
+	set anc   [$path itemcget $id -anchor]
+	set width	[$path itemcget $id -width] 
+	set height	[$path itemcget $id -height]
+	set tile	[$path itemcget $id -tile]
+	set fill	[$path itemcget $id -fill]
+	foreach {w h sqrw sqrh pw ph} [$path textureinfo $image] {break}
+	foreach {x1 y1} $coords {break}
+	if {$width < 2} {set width $w}
+	if {$height < 2} {set height $h}
+
+
+	if {$tile ne {}} {
+		set pw [lindex $tile 0]
+		set ph [lindex $tile 1]
+		if {$ph eq {}} {set ph $pw}
+		set width [expr {$pw * $width}]
+		set height [expr {$ph * $height}]
+	}
+
+	set h2 [expr {$height / 2.0}]
+	set w2 [expr {$width  / 2.0}]
+
+	if {[set tex [$path itemcget $id -gltexture]] ne {} } {
+		glActiveTexture GL_TEXTURE1
+		glEnable GL_TEXTURE1
+		glCallList [$path ~ $tex]
+		glActiveTexture GL_TEXTURE0
+	}
+	glCallList [$path ~ $image]
+	glEnable GL_TEXTURE_2D
+
+	glBegin GL_QUADS
+
+	glNormal3f 0 0 1.0
+	set idx -1
+	set fill [/rgb $fill [$path itemcget $id -alpha]]
+	set c [lindex $fill [incr idx]]
+	if {$c ne {} && $c ne {-} } {
+		glColor4fv $c
+	}
+	glMultiTexCoord2f GL_TEXTURE1 0 0
+	glTexCoord2f 0 $ph
+	glVertex3f -$w2 -$h2 0
+
+	set c [lindex $fill [incr idx]]
+	if {$c ne {} && $c ne {-} } {
+		glColor4fv $c
+	}
+	glMultiTexCoord2f GL_TEXTURE1 1 0
+	glTexCoord2f $pw $ph
+	glVertex3f $w2 -$h2 0
+
+	set c [lindex $fill [incr idx]]
+	if {$c ne {} && $c ne {-} } {
+		glColor4fv $c
+	}
+	glMultiTexCoord2f GL_TEXTURE1 1 1
+	glTexCoord2f $pw 0
+	glVertex3f $w2 $h2 0
+
+	set c [lindex $fill [incr idx]]
+	if {$c ne {} && $c ne {-} } {
+		glColor4fv $c
+	}
+	glMultiTexCoord2f GL_TEXTURE1 0 1
+	glTexCoord2f 0 0
+	glVertex3f -$w2 $h2 0
+
+	glEnd
+	glCallList  [$path ~ NOTEXTURE]
+	if {$tex ne {} } {
+		glActiveTexture GL_TEXTURE1
+		glBindTexture GL_TEXTURE_2D 0
+		glDisable GL_TEXTURE1
+		glActiveTexture GL_TEXTURE0
+	}
+	/zerobase [list $x1 $y1 [expr {$x1+$width}] [expr {$y1+$height}]]
+
+}
+
+## FIX ME - lines can't be wider than hardware rasteriser limit ~8 pixels
+#
+proc line {path id coords} {
+	foreach {x1 y1 x2 y2} $coords {break}
+
+	set lw [$path itemcget $id -width]
+	set idx -1
+	set fill [/rgb  [$path itemcget $id -fill] [$path itemcget $id -alpha]]
+	if {$lw < 9} {
+	 glPushAttrib GL_LINE_BIT
+	 glLineWidth $lw 
+	 glBegin GL_LINE_STRIP
+	 foreach {x y} $coords {
+		set c [lindex $fill [incr idx]]
+		if {$c ne {} && $c ne {-} } { glColor4fv $c }
+		glVertex3f $x $y 0
+	 }
+	 glEnd
+	 glPopAttrib
+	} else {
+	 ## FIX ME: Compute slope of line and add x or y to coords to make it wide
+	 ## by offsetting by tangent to the slope
+	 set lw [expr {$lw / 2.0}]
+	 set dx 0
+	 set dy $lw
+	 glBegin GL_QUAD_STRIP
+	 foreach {x y} $coords {
+		glVertex3f [expr {$x - $dx}] [expr {$y - $dy}] 0
+		glVertex3f [expr {$x + $dx}] [expr {$y + $dy}] 0
+	 }
+	 glEnd
+
+	}
+	list
+}
+
+# Disjoint Line segments
+#
+proc lines {path id coords} {
+	foreach {x1 y1 x2 y2} $coords {break}
+
+	glPushAttrib GL_LINE_BIT
+	glLineWidth [$path itemcget $id -width]
+	glBegin GL_LINES
+	foreach {x y} $coords {
+		glVertex3f $x $y 0
+	}
+	glEnd
+	glPopAttrib
+	list
+}
+
+
+proc points {path id coords} {
+	foreach {x1 y1 x2 y2} $coords {break}
+
+	glPushAttrib GL_POINT_BIT
+	glPointSize [$path itemcget $id -width]
+	glBegin GL_POINTS
+	foreach {x y} $coords {
+		glVertex3f $x $y 0
+	}
+	glEnd
+	glPopAttrib
+	list
+}
+
+## FIX ME : compute bbox of polygon
+## FIX ME: Need glu Callbacks to tessellate polygons
+
+
+proc polygon {path id coords} {
+	foreach {x1 y1 x2 y2} $coords {break}
+	set w [expr {$x2 - $x1}]
+	set h [expr {$y2 - $y1}]
+	set fill [$path itemcget $id -fill]
+	set alpha [$path itemcget $id -alpha]
+	set outline [$path itemcget $id -outline]
+	set convex [$path itemcget $id -convex]
+	glPushAttrib [expr {$::GL_POLYGON_BIT | $::GL_LINE_BIT | $::GL_STENCIL_BUFFER_BIT }]
+	if {[llength $coords] != 6 && [llength $fill] && ! $convex } {
+      glClear  GL_STENCIL_BUFFER_BIT 
+	  glEnable GL_STENCIL_TEST
+      glColorMask GL_FALSE GL_FALSE GL_FALSE GL_FALSE 
+      glStencilFunc GL_ALWAYS 1 1
+      glStencilOp GL_KEEP  GL_INVERT  GL_INVERT
+	 glBegin GL_POLYGON
+	 foreach {x y} $coords {
+		glVertex3f $x $y 0
+	 }
+     glEnd
+	}
+	if {[llength $fill] } {
+	  if { ! $convex && [llength $coords] != 6 } {
+        glColorMask GL_TRUE GL_TRUE GL_TRUE GL_TRUE
+        glStencilFunc GL_EQUAL 1 1
+        glStencilOp GL_KEEP  GL_KEEP GL_KEEP
+	  }
+	  set idx -1
+	  set f [/rgb $fill $alpha]
+	  glBegin [expr {[llength $coords] == 6 ? $::GL_TRIANGLES : $::GL_POLYGON}]
+	   foreach {x y} $coords {
+		set c [lindex $f [incr idx]]
+		if {[llength $f] > 1 && [llength $c]} {
+			glColor4fv  $c
+		}
+		glVertex3f $x $y 0
+	   }
+	  glEnd
+      glDisable GL_STENCIL_TEST
+	}
+	if {[llength $outline] } {
+	 glColor4fv [lindex [/rgb $outline $alpha] 0]
+	 glLineWidth [$path itemcget $id -width]
+	 glBegin GL_LINE_LOOP
+	  foreach {x y} $coords {
+		glVertex3f $x $y 0
+	  }
+	 glEnd
+	}
+	glPopAttrib
+	list
+}
+
+proc text {path id coords} {
+	foreach {x1 y1 x2 y2} $coords {break}
+	foreach {font size mode} [set fname [$path itemcget $id -font]] {break}
+	glMultMatrixd {1 0 0 0 0 -1 0 0 0 0 1 0 0 0 0 1}
+	#glScalef 1 -1 1
+	### FIX ME : Need font height from font load
+	foreach {fontw fonth scale} [$path fontmetric $fname] {break}
+
+	if {[set tex [$path itemcget $id -gltexture]] ne {} } {
+		glActiveTexture GL_TEXTURE1
+		glEnable GL_TEXTURE1
+		glCallList [$path ~ $tex]
+		glActiveTexture GL_TEXTURE0
+	}
+	glCallList [$path ~ $fname]
+	glPushAttrib GL_COLOR_BUFFER_BIT
+	glEnable GL_ALPHA_TEST
+	glScalef $scale $scale 1
+	if {[set depth [$path itemcget $id -depthhint]] ne {} } {
+		glAlphaFunc $::GL_GREATER $depth
+	} else {
+		glAlphaFunc $::GL_GREATER 0
+	}
+	set wmax 0
+	set hmax 0
+	foreach line [split  [$path itemcget $id -text] \n] {
+	foreach {width height} \
+     [$path RenderString [/rgb [$path itemcget $id -fill] [$path itemcget $id -alpha]] \
+		$line \
+		Front $fname] {break}
+		if {$width > $wmax} {set wmax $width}
+		set hmax [expr {$hmax + $height + 5}]
+		glTranslatef 0 [expr {-$fonth +5}] 0
+	}
+	glCallList [$path ~ NOTEXTURE]
+	if {$tex ne {} } {
+		glActiveTexture GL_TEXTURE1
+		glBindTexture GL_TEXTURE_2D 0
+		glDisable GL_TEXTURE1
+		glActiveTexture GL_TEXTURE0
+	}
+	glPopAttrib
+	set width [expr {$wmax * $scale}]
+	set height [expr {$hmax * $scale}]
+	/zerobase [list $x1 $y1 [expr {$x1 + $width}] [expr {$height + $y1}]]
+}
+
+
+proc group {path id coords} {
+
+	set group [$path itemcget $id -groupname]
+	if {$group eq {}} {error "no -groupname specified, -groupname cannot be blank"
+	}
+	glScalef 1 1 0.009999	;# Compress Z Scale to 0-.9999
+	glCallList [$path ~ $group]
+	
+	concat $coords $coords
+}
+
+proc chain {path id coords} {
+
+	foreach dl [$path itemcget $id -dlists] {
+		glCallList $dl
+	}
+	list
+}
+
+proc composite {path id coords} {
+
+	set items [$path itemcget $id -drawrectangles]
+	foreach {coords fill outline alpha width opt} $items {
+		glColor4fv [lindex [/rgb $fill $alpha] 0]
+		glRectfv [lrange $coords 0 1] [lrange $coords 2 3]
+	}
+
+	set items [$path itemcget $id -drawpolygons]
+	foreach {coords fill outline alpha width opt} $items {
+		glColor4fv [lindex [/rgb $fill $alpha] 0]
+		glBegin GL_POLYGON
+		  foreach {x y} $coords {glVertex3f $x $y 0}
+		glEnd
+	}
+
+	set items [$path itemcget $id -drawlines]
+	foreach {coords fill outline alpha width opt} $items {
+		glColor4fv [lindex [/rgb $fill $alpha] 0]
+		glBegin GL_LINE_STRIP
+		 foreach c $coords {glVertex2fv $c}
+		glEnd
+	}
+	$path itemcget $id -cbbox
+	list
+}
+
+
+proc cube {path id coords} {
+
+	if {[llength $coords] != 3} {
+		error "cube: needs 3 coordinates x,y,z"
+	}
+
+	set w [$path itemcget $id -width]
+	set h [$path itemcget $id -height]
+	set d [$path itemcget $id -depth]
+
+	set fill [$path itemcget $id -fill]
+	glScalef $w $h $d
+	if {$fill ne {}} {
+	  glutSolidCube 1
+	}
+	set alpha [$path itemcget $id -alpha]
+	set outline [$path itemcget $id -outline]
+	if { $outline ne {} } {
+	  glColor4fv [lindex [/rgb $outline $alpha] 0]
+	  glutWireCube 1
+	}
+	concat $coords $coords
+}
+
+
+proc teapot {path id coords} {
+
+	if {[llength $coords] != 3} {
+		error "cube: needs 3 coordinates x1,y1,z1"
+	}
+	set w [$path itemcget $id -width]
+	set h [$path itemcget $id -height]
+	set d [$path itemcget $id -depth]
+
+	#eval glTranslatef $coords
+	glScalef $w $h $d
+	set fill [$path itemcget $id -fill]
+	if {$fill ne {}} {
+		glutSolidTeapot 1
+	}
+	set alpha [$path itemcget $id -alpha]
+	set outline [$path itemcget $id -outline]
+	if { $outline ne {} } {
+	  glColor4fv [lindex [/rgb $outline $alpha] 0]
+	  glutWireTeapot 1
+	}
+	concat $coords $coords
+}
+
+
+
+return
+
+
+## Primatives from Qanim
+
+shape proc Push {args} {uplevel 1 [list Shape/_eval $togl  $args]}
+shape proc Matrix {args} {uplevel 1 [list Shape/_eval $togl [concat Matrix $args]] }
+shape proc + {args} {uplevel 1 Shape/_eval $togl [concat + $args]}
+shape proc - {args} {uplevel 1 Shape/_eval $togl [concat - $args]}
+
+shape proc Disable {args} {
+	foreach a $args {
+		glDisable GL_$a
+	}
+}
+
+shape proc Enable {args} {
+	foreach a $args {
+		glEnable GL_$a
+	}
+}
+
+shape proc Translate {{x 0} {y 0} {z 0}} {
+	glTranslatef $x $y $z
+}
+
+shape proc Rotate {angle {vector y} } {
+
+	set vars {x y z xy xyz yz}
+	set vect {{1 0 0} {0 1 0} {1 1 0} {1 1 1} {0 1 1}}
+	set p [lsearch -exact $vars $vector]
+	if {$p == -1} {
+		error "Rotate: '$vector' is not a valid vector, use x,y,z,xy,xyz,yz"
+	}
+	foreach {x y z} [lindex $vect $p] {break}
+	glRotatef $angle $x $y $z
+}
+
+
+shape proc Vertex {args} {
+
+	set args [join $args]
+	switch [llength $args] {
+		2 {
+			glVertex2fv $args 
+		}
+		3 {
+			glVertex3fv $args 
+		}
+		4 {
+			glVertex4fv $args 
+		}
+		default {error "Vertex: Needs 2,3, or 4 arguments"}
+	}
+}
+	
+shape proc TexCoord {x y} {
+
+	glTexCoord2f $x $y
+}
+shape proc TexCoordv {xy} {
+
+	glTexCoord2fv $xy
+}
+	
+
+shape proc MTexCoord {n x y} {
+
+	glMultiTexCoord2f GL_TEXTURE$n $x $y
+}
+
+shape proc MTexCoordv {n xy} {
+
+	glMultiTexCoord2fv GL_TEXTURE$n $xy
+}
+	
+
+
+shape proc Colour {{r 0} {g 0} {b 0} {a {}} } {
+	if {$a eq {} } {
+		glMaterialfv GL_FRONT GL_AMBIENT_AND_DIFFUSE [list $r $g $b 1]
+		glColor3f $r $g $b
+	} else {
+		glMaterialfv GL_FRONT GL_AMBIENT_AND_DIFFUSE [list $r $g $b $a]
+		glColor4f $r $g $b $a
+	}
+}
+
+shape proc Colourv {arglist} {uplevel 1 Colour $arglist}
+
+shape proc Shape {name} {
+		glCallList [$scene ~ $name]
+}
+
+shape proc ~ {name} {
+		glCallList [$scene ~ $name]
+}
+
+shape proc Texture {name} {
+		glCallList [$scene ~ $name]
+}
+
+shape proc MTexture {args} {
+
+	set idx 0
+	foreach name $args {
+		glActiveTexture GL_TEXTURE$idx
+		glCallList [$scene ~ $name]
+		glEnable GL_TEXTURE_2D
+		incr idx
+	}
+	glActiveTexture GL_TEXTURE0
+}
+
+
+shape proc SelectFont {name} {
+		glCallList [$scene ~ $name]
+}
+
+
+
+shape primative rod {{l 1} {w 1} {h 1} {nface 4} rx ry rz}  {
+
+
+
+}
+
+
+shape primative ball {{d 1}}  {
+
+    set quadObj [gluNewQuadric]
+    gluQuadricDrawStyle $quadObj GLU_FILL
+    gluQuadricNormals $quadObj GLU_SMOOTH
+    gluSphere $quadObj $d $slices $stacks
+
+}
+
+shape primative box {{l 1} {w 1} {h 1} } {
+
+	glPushMatrix
+	glScalef $l $w $h
+	glutSolidCube 1
+	glPopMatrix
+	
+}
+
+
+shape primative plane {{w 1} {h 1}} {
+
+	set mx [expr {-$w / 2.0}]
+	set px [expr {$w  / 2.0}]
+	set my [expr {-$h / 2.0}]
+	set py [expr {$h  / 2.0}]
+
+	glBegin GL_QUADS
+	glNormal3f 0 0 1.0
+
+	glTexCoord2d 0 0
+	glVertex3f -0.5 -0.5 0
+
+	glTexCoord2d 1 0
+	glVertex3f 0.5 -0.5 0
+
+	glTexCoord2d 1 1
+	glVertex3f 0.5 0.5 0
+
+	glTexCoord2d 0 1
+	glVertex3f -0.5 0.5 0
+
+	glEnd
+}
+
+
+
+shape primative blob {{l 1} {w 1} {h 1}}  {
+	glPushMatrix
+	glScalef $l $w $h
+    set quadObj [gluNewQuadric]
+    gluQuadricDrawStyle $quadObj GLU_FILL
+    gluQuadricNormals $quadObj GLU_SMOOTH
+    gluSphere $quadObj 1 32 32
+	glPopMatrix
+}
+
+shape primative disk {{center 0} {width 1} {resolution 20} } {
+		set x [gluNewQuadric]
+		gluDisk $x $center $width $resolution $resolution
+}
+
+
+shape primative cylinder {{base 0} {top 1} {height 1} {resolution 20} } {
+		set x [gluNewQuadric]
+#		gluCylinder $x $center $width $resolution $resolution
+}
+
+shape proc center {points} {
+
+	foreach {cx cy cz} {0 0 0} {break}
+	foreach {x y z} $points {
+		set cx [expr {$cx + $x}]
+		set cy [expr {$cy + $y}]
+		set cz [expr {$cz + $z}]
+	}
+	set len [expr {[llength $points] / 3.0}]
+	set cx [expr {$cx / $len}]
+	set cy [expr {$cy / $len}]
+	set cz [expr {$cz / $len}]
+	list $cx $cy $cz
+}
+
+shape primative pyramid {{b 1} {l 1}} {
+
+
+	set corners {
+		{-1 -1 0}
+		{1 -1 0}
+		{1 1 0}
+		{-1 1 0}
+	}
+	set texcoords {
+		{0 0}
+		{1 0}
+		{1 1}
+		{0 1}
+	}
+	set normals {
+		{0 0 ?}
+		{1 0 .}
+		{1 1 ?}
+		{? ? ?}
+	}
+	set apex {0 0 -5}
+
+	glNormal3f 0 0 1.0
+
+	plane $l $l
+
+	glBegin GL_TRIANGLE_FAN 
+	glTexCoord2f 0.5 0.5
+	glVertex3fv $apex
+	foreach cnr $corners tex $texcoords {
+		glTexCoord2fv $tex
+		glVertex3fv $cnr
+	}
+	glVertex3fv [lindex $corners 0]
+	glEnd
+
+
+}
+
+
+
+shape primative ring {{h 1} {l 1}} {
+
+	set dy1 [expr {$h / 2.0}]
+	set dy2 [expr {-$dy1}]
+
+	set clp1 [list $dy1 { 0 1 0}]
+	set clp2 [list $dy2 {0  -1 0}]
+
+	glPushMatrix
+	glPushMatrix
+	glPushAttrib  GL_TRANSFORM_BITS
+	glTranslatef 0 $dy1 0
+	glClipPlane GL_CLIP_PLANE0 {0 -1 0}
+	glEnable GL_CLIP_PLANE0
+	glPopMatrix
+	glTranslatef 0 $dy2 0
+	glClipPlane GL_CLIP_PLANE1 {0 1 0}
+	glEnable GL_CLIP_PLANE1
+	glPopMatrix
+	glutSolidSphere $l 64 64
+	glDisable GL_CLIP_PLANE1
+	glDisable GL_CLIP_PLANE0
+	glPopAttrib
+}
+
+

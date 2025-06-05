@@ -1,0 +1,138 @@
+#
+# (c) Philip Quaife 2005
+#
+# Routines to bind events
+#
+#
+#
+
+proc Scene/Bindings {togl} {
+	variable $togl
+	upvar 0 $togl Scene
+
+ foreach {ev actlist} {
+		<<ROTATE>>	    {<B3-Motion> <Control-B1-Motion>}
+ 		<<MARK>>	      {<Button-3> <Control-Button-1> <Alt-Button-1>}
+		<<ZOOM>>	      {<Shift-B3-Motion> <Alt-B1-Motion>}
+		<<MOVE-IN>>	   {<Key-Prior>}
+		<<MOVE-OUT>>	  {<Key-Next>}
+		<<MOVE-LEFT>>	 {<Key-Left>}
+		<<MOVE-RIGHT>> {<Key-Right>}
+		<<TURN-RIGHT>> {<Shift-Key-Right>}
+		<<TURN-LEFT>>	 {<Shift-Key-Left>}
+		<<MOVE-UP>>	   {<Key-Up>}
+		<<MOVE-DOWN>>  {<Key-Down>}
+
+		<<PICK>>	  {<Button-1>} } {
+
+		eval event add $ev $actlist
+ }
+
+
+
+    Scene/bind $togl <<MARK>> {
+ 		set Scene(startx) %x
+ 		set Scene(starty) %y
+ 		set Scene(scale0) $Scene(Scale)
+ 		set Scene(offset0) [$Scene(Scene) view get OffsetZ]
+		focus %W
+		list
+ 	}
+
+    Scene/bind $togl <<ROTATE>> {
+ 	    set yangle [expr {[View %W get RotY] + (%x - $Scene(startx))}]
+	    set xangle [expr {[View %W get RotX] + (%y - $Scene(starty))}]
+ 		set Scene(startx) %x
+ 		set Scene(starty) %y
+		View %W update RotX $xangle RotY $yangle
+		list
+  	}
+
+	Scene/bind $togl <<MOVE-RIGHT>>  {
+		View %W inc OffsetX 0.1
+		list
+	}
+ 
+	Scene/bind $togl <<MOVE-LEFT>>  {
+		View %W inc OffsetX -0.1
+		list
+	}
+ 
+	Scene/bind $togl <<MOVE-DOWN>>  {
+		View %W inc RotX 0.1
+		list
+	}
+ 
+	Scene/bind $togl <<MOVE-UP>>  {
+		View %W inc RotX -0.1
+		list
+	}
+
+	Scene/bind $togl <<TURN-LEFT>>  {
+		View %W inc RotY 0.1
+		list
+	}
+ 
+	Scene/bind $togl <<TURN-RIGHT>>  {
+		View %W inc RotY -0.1
+		list
+	}
+
+   Scene/bind $togl <<ZOOM>> {
+        set q [ expr ($Scene(starty) - %y) / 400.0 ]
+		View %W update OffsetZ [expr {$Scene(offset0) + 2 * $q }]
+		list
+    }
+
+	Scene/bind $togl <<MOVE-OUT>> {
+		View %W inc OffsetZ -0.1
+		list
+	}
+
+	Scene/bind $togl <<MOVE-IN>> {
+		View %W inc OffsetZ 0.1
+		list
+	}
+
+    Scene/bind $togl <<WHEEL>> {
+         set q [ expr %D / abs(%D) ]
+ 		 set Scene(Scale) [expr $Scene(Scale) + $Scene(Scale)/ 10.0 * $q]
+		list
+    }
+
+ event add <<WHEEL>> <MouseWheel>
+ Scene/bind $togl <Key-Tab> "bell ; #%W"
+ 
+}
+
+
+proc Scene/bind {togl event cmd} {
+	variable $togl
+	upvar 0 $togl Scene
+
+	set ns [namespace current]
+
+	if {$ns eq {::} } {set ns {}}
+	#set cmd "puts {$event} ; $cmd"
+
+
+	foreach {arg ref body} [bind/scan $cmd] {break}
+	proc ${ns}::$togl-$event $arg "variable \$W \n  upvar 0 \$W Scene \n $body ; \$Scene(Scene) view reset"
+	bind $togl $event "${ns}::$togl-$event $ref"
+	puts "bind $togl/$event = $event $ref "
+}
+
+
+proc bind/scan {string} {
+
+	set m [regexp -inline -all {[%].} $string]
+	set m [lsort -unique $m]
+
+	set arglist [string map {% {}} $m]
+
+
+	list $arglist $m [string map {% $} $string]
+}
+
+
+

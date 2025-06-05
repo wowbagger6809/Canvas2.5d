@@ -1,0 +1,97 @@
+#
+# canvas gl
+# © philip quaife July 6 2005, July 2007
+#
+#
+
+#
+## FIXME: Need to manage current tag automatically
+#
+proc /bindinit {path} {
+	upvar [nc]::$path/bindings bindings
+
+	set bindings(_current) {}
+	set bindings(???) {}
+
+}
+
+proc bind {path tagid event script} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+	upvar [nc]::$path/tags tags
+	upvar [nc]::$path/bindings bindings
+
+	set ismouse [expr {[lsearch -exact {<1> <2> <3> <4> <Button-1> <Button-2> <Button-3> <Motion> <B1-Motion> <B2-Motion> <B3-Motion>} $event] > -1}]
+
+	### FIX ME
+    ### Need to virtualise and keep list 
+	### and call list of callbacks manually
+	###
+	::bind $path $event "[nc]::/bindcallback $path $event $ismouse $tagid %x %y"
+
+	set bindings($event,$tagid) $script
+	puts "BINDING $tagid $event - $script"
+
+	if {! [string length $script]} {
+		lDel bindings($event) $tagid
+	} else {
+		lAdd bindings($event) $tagid
+	}
+}
+
+
+proc /bindcurrent {path state x y} {
+return
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+	upvar [nc]::$path/tags tags
+	upvar [nc]::$path/bindings bindings
+
+	if {! $state} {
+		if {[llength $tags(current)]} {
+			dtag $path $tags(current) current
+		}
+		return
+	}
+	set idlist [pickObject $path $x $y 1 1]
+	if {! [llength $idlist] } {return}
+	set id [lindex $idlist end]
+	atag $path $id current
+}
+
+proc /bindcallback {path event ismouse tagid x y} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+	upvar [nc]::$path/tags tags
+	upvar [nc]::$path/bindings bindings
+
+#	puts "BIND CALLBACK $path $event $ismouse $tagid $x $y"
+
+	set id [/tagid $path current]
+	if {1 } {
+#		set idlist [pickObject $path $x $y 1 1]
+		set idlist [$path find closest $x $y 1 1]
+puts "CURRENT $id: $idlist"
+		if {$event ne {<Motion>}} {updcurrent $path $idlist}
+		if {! [llength $idlist] } {return}
+		set id [lindex $idlist end]
+	}
+	set itemtags [gettags $path $id]
+	## FIX ME: Add %var substitution
+	set maplist [list %W $path %x $x %y $y %i $id %I $idlist]
+	foreach tag $bindings($event) {
+		if {$tag eq {all} || $tag == $id || [lsearch $itemtags $tag] > -1} {
+	#		puts "Match $id ($itemtags) -> $event ($tag)"
+			set err [catch {uplevel #0 [string map $maplist $bindings($event,$tag)]} msg]
+			if {$err == 3} {break}
+			if {$err } {
+				uplevel #0 [list bgerror "$msg\n$::errorInfo"]
+				return
+			}
+		}
+	}
+	list
+}
+
+
+

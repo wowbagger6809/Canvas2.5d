@@ -1,0 +1,149 @@
+
+#
+# Make it simple for novices to cope with arguments
+#
+# (c) Q Solutions 2005.
+#
+
+ # The argument processor.
+ proc userargs {_arglist _args} {
+
+
+#START-INIT
+	set _init [list]
+	set _initv [list]
+	set _rq [list]
+	set _hasargs 0
+	set _names {}
+	foreach _a $_arglist {
+		lappend _names [lindex $_a 0]
+		switch [llength $_a] {
+			1 {
+				if {$_a eq {args} } {set _hasargs 1}
+			}
+			2 {
+				foreach {_n _d} $_a {break}
+				lappend _init $_n
+				lappend _initv $_d
+			}
+			3 {
+				foreach {_n _d _e} $_a {break}
+				if {$_d ne {-}} {
+					lappend _init $_n
+					lappend _initv $_d
+				}
+				switch $_e {
+					required {
+						lappend _rq $_n
+					}
+				}
+			}
+			default {
+				error "Dont know what to do with 3+ options for $a"
+			}
+		}
+	}
+
+#END-INIT
+
+	if {[llength $_init]} {
+		uplevel 1 	[list foreach $_init  $_initv {break}]
+	}
+
+#START-ARGS
+	set _ai -1
+	set _fnd [list]
+	for {set _i 0} {$_i < [llength $_args]} {incr _i} {
+		switch -- [set _v [lindex $_args $_i]] {
+			- {
+				incr _ai
+			}
+			-- {
+				uplevel 1 [list set [lindex $_names [set _ai [expr {($_ai+1) % [llength $_names]}]]] [lindex $_args [incr _i]] ]
+				lappend _fnd [lindex $_names $_ai]
+			}
+			default {
+				if {[lsearch -exact $_names $_v] != -1 } {
+					uplevel 1 [list set $_v [lindex $_args [incr _i]]]
+					lappend _fnd $_v
+				} else {
+#START-HASARGS
+					if {$_hasargs && $_ai == [llength $_names] - 1} {
+						uplevel 1 [list set args [lrange $_args $_ai end]]
+						break
+					}
+#END-HASARGS
+					uplevel 1 [list set [lindex $_names [set _ai [expr {($_ai+1) % [llength $_names]}]]] $_v ]
+					lappend _fnd [lindex $_names $_ai]
+
+				}
+			}
+		}
+	}
+	
+#END-ARGS
+	if {[llength $_rq]} {
+#START-REQUIRED
+		foreach _i $_rq {
+			if {[lsearch $_fnd $_i] == -1} {
+				uplevel 1 [list error "missing argument $_i"]
+			}
+		}
+#END-REQUIRED
+	}
+ }
+
+# The TCL Way
+
+proc argsproc {name _arglist body} {
+
+	# get the text of the userargs procedure
+	set b [info body userargs]
+	# pull out the two sections of interest
+	foreach {- init} [regexp -inline {#START-INIT(.*?)#END-INIT} $b] {break}
+	foreach {- loop} [regexp -inline {#START-ARGS(.*?)#END-ARGS} $b] {break}
+	foreach {- required} [regexp -inline {#START-REQUIRED(.*?)#END-REQUIRED} $b] {break}
+
+	# process the arguments using the code from userargs
+	eval $init
+
+	set newbody {}
+
+	if {[llength $_init]} {
+		append newbody "\n#Initialise arguments\n"
+		append newbody "foreach {$_init} {$_initv} {break}\n\n"
+	}
+
+	# specialise Has args
+	if {$_hasargs} {
+		regsub {[$]_hasargs &&} $loop {} loop
+	} else {
+		regsub {#START-HASARGS.*?#END-HASARGS} $loop {} loop
+	}
+	# specialise length of named arguments
+	regsub -all {[[]llength [$]_names[]]} $loop [llength $_names] loop
+	# redefine the args variable
+	regsub -all {_args} $loop {args} loop
+	# replace names with actual names
+	regsub -all {\$_names} $loop "{$_names}" loop
+	# remove uplevel
+	regsub -all -lineanchor {uplevel 1 [[]list (.*?)[]]$} $loop {\1} loop
+	if {! ([llength $_names] == 1 && [lindex $_names 0] eq {args})} {
+		append newbody "# Process arguments\n"
+		append newbody $loop
+		if {[llength $_rq]} {
+			regsub -all {\$_rq} $required "{$_rq}" required
+			regsub -all -lineanchor {uplevel 1 [[]list (.*?)[]]$} $required {\1} required
+			append newbody "\n#Check on required arguments"
+			append newbody $required
+		}
+		append newbody "\n#Start of body code\n\n"
+	}
+	append newbody $body
+	# Now define the proc
+	::proc $name {args} $newbody
+	puts "$name ($_names)"
+}
+
+
+

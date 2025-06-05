@@ -1,0 +1,775 @@
+#
+#
+# QCanvas2d - canvas functions
+#
+# Copyright © Philip Quaife 1 August 2007
+#
+#
+
+#
+# Allocate display lists in blocks
+# Use first dlist as reference to call
+# use this dlist to call other dlists
+#
+# Indexes
+#    0 - main list - ID and call 1-n 
+#    1 - Transform
+#    2 - Colour
+#	 3 - Object
+#	 
+
+
+proc lAdd {ref item} {
+        upvar 1 $ref var
+		if {![info exists var]} {set var [list]}
+        if  {[catch {lsearch -exact $var $item} p] } {
+                set var $item
+                return 1
+        }
+        if {$p == -1} {
+                lappend var $item
+                return 1
+        }
+        return 0
+}
+
+proc lDel {ref item} {
+        upvar 1 $ref var
+		if {![info exists var]} {set var [list]}
+        if { [set p [lsearch -exact $var $item]] == -1 } {
+                return 0
+        }
+        set var [lreplace $var $p $p]
+        return 1
+}
+
+proc /rgb {c args} {
+	foreach c  [winfo rgb . $c] {
+		lappend rgb [expr {$c / 65535.0}]
+	}
+	if {[llength $args]} {set rgb [concat $rgb $args]}
+	set rgb
+}
+
+
+proc idleupdate {path} {
+	$path/togl postredisplay
+}
+
+proc create {path what args} {
+	variable itemoptiondb
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+	upvar [nc]::$path/tags tags
+
+set t1 [cc]
+
+	set w $canvas(name)
+
+	set coords [lindex $args 0]
+	if {[llength $coords] < 2} {
+		foreach {coords args} [/separgs $args] {break}
+	} else {
+		set args [lrange $args 1 end]
+	}
+
+	foreach {key value} [array get opts] {
+		set items($id,$key) $value
+		lappend keys $key
+	}
+
+	array set opts [array get itemoptiondb -*]
+	if {[info exists itemoptiondb($what)]} {
+		array set opts $itemoptiondb($what)
+	}
+
+	set keys [array names itemoptiondb]
+
+	set id [/unique]
+	foreach {key value} $args {
+		if {! [info exists opt($key)] } {
+		  set l [lsearch -glob $keys $key*]
+		  if {$l != -1 } {
+			set key [lindex $keys $l]
+		 }
+		}
+		set opts($key) $value
+		set items($id,$key) $value
+	}
+
+	set dl [$path dlist alloc 4]
+	set items($id,type) $what
+	set items($id,dlist) $dl
+	set tags($id) [list]
+
+
+	set opts(-coords) $coords
+
+	itemconfv $path $id [array get opts]
+
+	vlist $path add $opts(-group) $dl
+
+	/rebuild $path $id 0 0 1
+
+	lappend items(all) $id
+
+	$path idleupdate
+
+	set t [expr {[cc]-$t1}]
+
+	set id
+}
+
+proc delete {path args} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	foreach tagid $args {
+	foreach  id [/tagid $path $tagid] {
+	 /tagset $path $id {}
+	 $path vlist remove $items($id,-group) $items($id,dlist)
+	 $path dlist free $items($id,dlist)
+	 foreach a [array names items $id,*] {
+		unset items($a)
+	 }
+	 lDel items(all) $id
+	}
+	}
+	$path idleupdate
+	list
+}
+
+proc type {path tagid} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	set id [lindex [/tagid $path $tagid] 0]
+	if {$id eq {}} {return {}}
+
+	set items($id,type)
+}
+
+
+proc coords {path tagid args} {
+
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	set id [lindex [/tagid $path $tagid] 0]
+	if {$id eq {}} {return {}}
+
+	if {[llength $args] == 0} {
+		foreach {dx dy} $items($id,-translation) break
+		foreach {ox oy} $items($id,-coords) {
+		 lappend new [expr {$ox + $dx}] [expr {$oy + $dy}]
+		}
+		return $new
+	}
+	if {[llength $args] == 1} {set args [lindex $args 0]}
+  	set items($id,-translation) {0 0}
+  	set items($id,-coords) $args
+	/rebuild $path $id 1 0
+	$path idleupdate
+}
+
+
+proc move {path tagid dx dy} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	foreach id [/tagid $path $tagid] {
+	  set new {}
+	  foreach {ox oy} $items($id,-translation) break
+		set items($id,-translation) [list [expr {$ox + $dx}] [expr {$oy + $dy}]]
+	   /rebuild $path $id 0 1
+	}
+	$path idleupdate
+}
+
+proc getdlist {path tagid {which {trfm}} } {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+
+	switch $which {
+		transform - trfm {set offset 1}
+		color - colour {set offset 2}
+		obj - object {set offset 3}
+	}		
+	set ret [list]
+	foreach id [/tagid $path $tagid] {
+		lappend ret [expr {$items($id,dlist) + $offset}]
+	}
+	set ret
+}
+
+## FIX ME: Does not scale about the correct point !!!
+proc scale {path tagid ox oy sx sy} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	foreach id [/tagid $path $tagid] {
+	  set new {}
+	  foreach {dx dy} $items($id,-translation) break
+	  foreach {x y} $items($id,-coords) {
+		lappend new [expr {($x-$ox+$dx) * double($sx) + $ox}] [expr {($y-$oy+$dy) * double($sy) + $oy}]
+	  }
+  	  set items($id,-translation) {0 0}
+  	  set items($id,-coords) $new
+	  /rebuild $path $id 1 0
+	}
+	$path idleupdate
+}
+
+# FIX ME: we want to use this version but we cannot because the real canvas
+#  widget scales about an arbitary point, we may be able to do this if we
+#  include another transormation in the trfm list
+#
+proc XXXscale/notpossible {path tagid ox oy sx sy} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	foreach id [/tagid $path $tagid] {
+	  set new {}
+	  foreach {dx dy} $items($id,-scale) break
+		set items($id,-scale) [list [expr {$ox + $dx}] [expr {$oy + $dy}]]
+	   /rebuild $path $id 0 1
+	}
+}
+
+
+proc bbox/coords {path tagid} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	foreach v {x y } {
+		set ${v}min  1E31
+		set ${v}max -1E31
+	}
+	set ids [/tagid $path $tagid] 
+	if {![llength $ids]} {return {}}
+	set found 0
+	foreach id $ids {
+		set found 1
+		  foreach v {x y } {
+		    set i${v}min  1E31
+		    set i${v}max -1E31
+		  }
+	      
+	      set c $items($id,bbox)
+		  if {! [llength $c]} {set c $items($id,-coords)}
+	      foreach {dx dy} $items($id,-translation) break
+	      foreach {adx ady} $items($id,anchordelta) break
+	      foreach {sx sy} $items($id,-scale) break
+		  foreach {x y} $c {
+			set x [expr {($x*$sx + $dx + $adx)}]
+			set y [expr {($y*$sy + $dy + $ady)}]
+			if {$x < $ixmin} {set ixmin $x}
+			if {$y < $iymin} {set iymin $y}
+			if {$x > $ixmax} {set ixmax $x}
+			if {$y > $iymax} {set iymax $y}
+		  }
+		if {$ixmin < $xmin} {set xmin $ixmin}
+		if {$iymin < $ymin} {set ymin $iymin}
+		if {$ixmax > $xmax} {set xmax $ixmax}
+		if {$iymax > $ymax} {set ymax $iymax}
+
+	}
+#	puts "bbox $tagid $items($id,type) -> $xmin,$ymin $xmax $ymax"
+	if {! $found } {return {}}
+	foreach v {x y} {
+		set ${v}min  [expr {int([set ${v}min])}]
+		set ${v}max  [expr {int([set ${v}max])}]
+	}
+	list $xmin $ymin $xmax $ymax
+}
+
+proc bbox {path tagid} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	foreach v {x y } {
+		set ${v}min  1E31
+		set ${v}max -1E31
+	}
+	set ids [/tagid $path $tagid] 
+	if {![llength $ids]} {return {}}
+	set found 0
+	foreach id $ids {
+		set found 1
+		if {[llength $items($id,compbbox)] } {
+			foreach {ixmin iymin ixmax iymax} $items($id,compbbox) break
+		} else {
+		  set ixmin  1E31
+		  set iymin  1E31
+		  set ixmax  -1E31
+		  set iymax  -1E31
+	      foreach {adx ady} $items($id,anchordelta) break
+	      foreach {dx dy} $items($id,-translation) break
+	      foreach {sx sy} $items($id,-scale) break
+		  set bbox $items($id,bbox)
+		  if {[llength $bbox]} {
+		   foreach {x y} $bbox {
+			set x [expr {($x*$sx + $dx+$adx)}]
+			set y [expr {($y*$sy + $dy+$ady)}]
+			if {$x < $ixmin} {set ixmin $x}
+			if {$y < $iymin} {set iymin $y}
+			if {$x > $ixmax} {set ixmax $x}
+			if {$y > $iymax} {set iymax $y}
+		   }
+		  } else {
+			foreach {ixmin iymin ixmax iymax} [bbox/coords $path $id] {break}
+		  }
+		  set items($id,compbbox) [list $ixmin $iymin $ixmax $iymax]
+		}
+		if {$ixmin < $xmin} {set xmin $ixmin}
+		if {$iymin < $ymin} {set ymin $iymin}
+		if {$ixmax > $xmax} {set xmax $ixmax}
+		if {$iymax > $ymax} {set ymax $iymax}
+	}
+		set xmax  [expr {int(round($xmax))}]
+		set ymax  [expr {int(round($ymax))}]
+		set xmin  [expr {int(round($xmin))}]
+		set ymin  [expr {int(round($ymin))}]
+
+	if {! $found } {return {}}
+#	puts "bbox $tagid $items($id,type) -> $xmin,$ymin $xmax $ymax"
+	list $xmin $ymin $xmax $ymax
+}
+
+proc itemcget {path tagid key args} {
+
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	set id [lindex [/tagid $path $tagid] 0]
+	if {$id eq {} } {return {}}
+	if { [llength $args] } {
+	  set items($id,$key) [lindex $args 0]
+	}
+	set items($id,$key)
+}
+
+proc itemconfigure { path tagid args } {
+	variable itemoptiondb
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+
+	foreach id [/tagid $path $tagid] {
+	  if { [llength $args] > 1 || [llength [lindex $args 0]] == 2} {
+		itemconfv $path $id $args
+		continue
+	  } 
+	  if {[llength $args]} {
+			set k [lindex $args 0]
+	  } else {set k -*}
+
+	  foreach {key value} [array get items $id,$k] {
+		set key [string map  [list "$id," {}] $key]
+		if {[info exists itemoptiondb($key)]} {
+			set def $itemoptiondb($key)
+		} else { set def {}}
+		lappend ret [list $key {} {} $def $value]
+	  }
+	  if {[llength $args] == 1} {
+		set ret [lindex $ret 0]
+	  }
+	  return $ret
+	}
+	list
+}
+
+proc itemconfv {path tagid arglist} {
+
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+set t1 [cc]
+	foreach  id [/tagid $path $tagid] {
+	 set dl $items($id,dlist)
+	 set btrsm 0
+	 set bobj 0
+	 set bmain 0
+	 foreach {key value} $arglist {
+		set old($key) $value
+		if {[info exists items($id,$key)]} {
+			set old($key) $items($id,$key)
+		}
+		set items($id,$key) $value
+	 }
+	 foreach {key value} $arglist {
+		#puts "update $id:$key: <$value> $items($id,$key)"
+		switch -exact -- $key {
+			#?Option?# - Specialise here
+			-alpha - -fill  {
+				define $path [expr {$dl + 2}] {
+				  if {[llength $items($id,-fill)] == 1} {
+					glColor4fv [/rgb $items($id,-fill) $items($id,-alpha)]
+				  }
+				}
+				if {[llength $items($id,-fill)] > 1} { set bobj 1}
+			}
+			-blend - -smooth {set bmain 1}
+
+			-anchor - -rotation - -rotationX - -rotationY -
+			-scale - -translation {
+				set btrsm 1
+			}
+			-image {
+				if {$value ne {}} {
+					maketexturefromimage $path $value
+				}
+				set bobj 1
+			}
+			-text - -activedash - -disableddash -  -dashoffset -
+			-width - -dlists - -gltexture - -texture - 
+			-coords {
+				set bobj 1
+			}
+			-tag -
+			-tags {/tagset $path $id $value}
+			-state {
+				vlist $path [expr {$value eq {normal} ? {show} : {hide} }] $items($id,-group) $dl
+			}
+			-groupname { vlist $path create $value}
+			-group {
+			  if {$value ne $old(-group)} {
+				  vlist $path delete $old(-group) $dl
+			  }
+			  vlist $path add $value $dl
+			}
+			-font {
+				foreach {name size mode} [string tolower $value] {break}
+				if {$mode eq {}} {set mode normal}
+				if {$size eq {}} {set size 12}
+				if {[lsearch $canvas(fonts) $name-$size-$mode] == -1 } {
+					if {[$path font $name $size $mode] eq {}} {
+						set name default
+						set mode normal
+						if {[$path font $name $size $mode] eq {}} {
+							return -code error -errorinfo ".c itemconfigure -font cannot find default font" "No default font found"
+						}
+					}
+				}
+				set items($id,-font) [list $name $size $mode]				
+				set bobj 1
+			}			
+		}
+	 }
+  }
+	 /rebuild $path $id $bobj $btrsm $bmain
+	$path idleupdate
+set ::_conf [expr {[cc] - $t1}]
+}
+
+proc /rebuild {path id bobj btrsm {bmain 0} } {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	$path/togl makecurrent
+	set dl $items($id,dlist)
+	if {$bobj} {
+	  define $path [expr {$dl+3}] {
+	    set bbox [primative $items($id,type) $path $id $items($id,-coords)]
+	  }
+	  if {[llength $bbox] == 6} {
+	    set items($id,bcube) $bbox
+		foreach {x1 y1 z1 x2 y2 z2} $bbox {break}
+	    set items($id,bbox) [list $x1 $y1 $x2 $y2]
+	  } else {
+	    set items($id,bbox) $bbox
+	  }
+	}
+	if {$bobj || $btrsm} {
+	  foreach {tx1 ty1} $items($id,-coords) {break}
+	  set x1 {}
+	  foreach {x1 y1 x2 y2} $items($id,bbox) {break}
+	  if {$x1 eq {} } {
+		set dx 0 ; set dy 0
+		set tx1 0 ; set ty1 0
+		## FIX ME : THIS IS A MESS
+	  } else {
+	   //anchorpos $items($id,-anchor) $x1 $y1   \
+		[expr {$x2 - $x1}] [expr {$y2 - $y1}] \
+		dx dy
+	  }
+	  set items($id,anchordelta) [list $dx $dy]
+	  define $path [expr {$dl + 1}] {
+		eval glTranslatef $items($id,-translation) $items($id,-layer)
+		glTranslatef $tx1 $ty1 $items($id,-layer)
+		glRotatef  $items($id,-rotation) 0 0 1
+		if {$items($id,-rotationX) } {
+			glRotatef  $items($id,-rotationX) 1 0 0
+		}
+		if {$items($id,-rotationY) } {
+			glRotatef  $items($id,-rotationY) 0 1 0
+		}
+		eval glScalef	 $items($id,-scale) 1
+		glTranslatef $dx $dy 0
+	  }
+	}
+	if {$bmain} {
+	 glNewList $dl GL_COMPILE
+	  glPushName $id
+	  glPushMatrix
+	  set at 0
+	  if {$items($id,-smooth) } {
+		set at [expr {$at | $::GL_POLYGON_BIT | $::GL_LINE_BIT | $::GL_POINT_BIT}]
+	  }
+	  if {$items($id,-blend) } {
+		set at [expr {$at | $::GL_COLOR_BUFFER_BIT}]
+	  }
+	  if {$at} {	glPushAttrib $at}
+  	  if {$items($id,-smooth) } {
+	    glEnable GL_LINE_SMOOTH
+	    glEnable GL_POINT_SMOOTH
+	    glEnable GL_POLYGON_SMOOTH
+	  }
+	  if {$items($id,-blend) } {
+		glEnable GL_BLEND
+	  }
+	  glCallList [expr {$dl + 1}]
+	  glCallList [expr {$dl + 2}]
+	  glCallList [expr {$dl + 3}]
+	  glPopMatrix
+	  glPopName
+	  if {$at } {
+		glPopAttrib
+	  }
+	 glEndList
+	}
+
+  set items($id,compbbox) {}
+}
+
+proc rotate {path tagid amt {centerx 0} {centery 0} } {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	foreach id [/tagid $path $tagid] {
+ 	  set ramt [expr { $amt + $items($id,-rotation)}]
+	  itemconfigure $path $id -rotation $ramt
+	}
+}
+
+proc translate {path tagid xamt {yamt 0}} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	set id $tagid
+
+	set xamt [expr { $xamt + [lindex $items($id,-translation) 0]}]
+	set yamt [expr { $yamt + [lindex $items($id,-translation) 1]}]
+	itemconfigure $path $id -translation [list $xamt $yamt 0]
+}
+
+
+proc /separgs {list} {
+	set i 0
+	set coords {}
+	set args {}
+	while {[llength $list]} {
+		if {[string is double [lindex $list 0]] } {
+			lappend coords [lindex $list 0]
+			set list [lrange $list 1 end]
+		} else {
+			break
+		}
+
+	}
+
+	list $coords $list
+}
+
+proc load {path file} {
+
+	namespace inscope primatives source $file
+}
+
+
+proc register {path name arglist body} {
+	upvar [nc]::$path/togl canvas
+
+	namespace inscope primatives proc $name $arglist $body
+
+	lAdd canvas(primatives) $name
+}
+
+proc glenviron {path args} {
+	upvar [nc]::$path/togl canvas
+
+	if {! [llength $args]} {return $canvas(glenables)}
+	set mode add
+	set not {}
+	foreach e $args {
+	 switch -- $e {
+	  + {set mode add}
+	  - {set mode del}
+	  / {set mode not}
+	  default {
+		  switch $mode {
+			add {lAdd canvas(glenables) $e}
+			del {lDel canvas(glenables) $e}
+			not {lAdd not $e}
+		  }
+	  }
+	 }
+	}
+	glNewList [$path ~ GLEnables] GL_COMPILE
+		foreach e $canvas(glenables) {
+			glEnable GL_$e
+		}
+		foreach e $not {
+			glDisable GL_$e
+		}
+	glEndList
+}
+
+proc //anchorpos {anchor left top width height {varx {}} {vary {}} } {
+	if {$varx ne {} } {
+		upvar $varx dx
+		set dx 0
+	}
+	if {$vary ne {} } {
+		upvar $vary dy
+		set dy 0
+	}
+
+	set right [expr {$left + $width}]
+	set bot   [expr {$top + $height}]
+	set hh [expr {$height / 2.0}]
+	set hh [expr {$height / 2.0}]
+	set hw [expr {$width / 2.0}]
+	set x $left
+	set y $top
+
+	switch $anchor {
+		n {set x [expr {($right + $left) / 2.0}] ; 	set y $top ; set dy $hh}
+		s {set x [expr {($right + $left) / 2.0}] ; 	set y $bot ; set dy -$hh}
+		e {set x $right ; set y [expr {($bot + $top) / 2.0}] ; set dx -$hw	}
+		w {set x $left ; set y [expr {($bot + $top) / 2.0}] 	; set dx $hw	}
+		nw {set x $left ; set y $top ; set dy $hh ; set dx $hw}
+		ne {set x $right ; set y $top ; set dy $hh ; set dx -$hw}
+		sw {set x $left ; set y $bot ; set dy -$hh ; set dx $hw}
+		se {set x $right ; set y $bot ; set dy -$hh ; set dx -$hw}
+		c {set x [expr {($right + $left) / 2.0 }] ; set y [expr {($bot + $top) / 2.0 }] }
+	}
+	list $x $y
+}
+
+proc canvasx {path x} {
+	upvar [nc]::$path/togl canvas
+	set x1 0 ; set y1 0
+	foreach {x1 y1} $canvas(-scrollregion) break
+	expr {$canvas(xoffset) + $x + $x1}
+}
+proc canvasy {path y} {
+	upvar [nc]::$path/togl canvas
+	set x1 0 ; set y1 0
+	foreach {x1 y1} $canvas(-scrollregion) break
+	expr {$canvas(yoffset) + $y + $y1}
+}
+
+proc ???group/notneeded??? {path cmd name args} {
+	upvar [nc]::$path/togl canvas
+	switch -exact $cmd {
+		create {	vlist $path create $name 	}
+		delete {}
+		bbox {}
+		default {error "Unknown group subcmd should be ?add del bbox?" }
+	}
+}
+
+proc glquery {path what {len 1}} {
+	set vect [tcl3dVector GLfloat $len]
+	glGetFloatv GL_$what $vect
+	for {set i 0} {$i < $len} {incr i} {
+		lappend l [$vect get $i]
+	}
+	$vect delete
+	set l
+}
+
+proc postscript {path args} {
+	upvar [nc]::$path/togl canvas
+
+    if {! [tcl3dHaveGl2ps] } {
+	  puts "No postscript library GL2ps found"
+	  return
+	}
+    set fileName [format "%s.%s" ps-$path "pdf"]
+ 
+	## FIX ME does not work for an unknown reason
+	##
+	## Reason is that glPS code cannot take an inverted viewport
+	## will need to translate canvas and use yscale of -1
+	##
+   tcl3dGl2psCreatePdf [$path togl] $fileName "[wm title [winfo toplevel $path]]"
+}
+
+if {0} {
+		check make current called appropriately.
+
+		?view scroll units + pages
+		itemconfigure  allow part option name ie -ta for -tags
+
+        pathName postscript should work but it doesnt ??
+
+        pathName bind tagOrId ?sequence? ?command?
+        pathName dchars tagOrId first ?last?
+        pathName focus ?tagOrId?
+        pathName icursor tagOrId index
+
+        pathName index tagOrId index
+        pathName insert tagOrId beforeThis string
+        ...?
+
+        pathName scan option args
+      
+            pathName scan mark x y
+            pathName scan dragto x y ?gain?.
+       
+        pathName select option ?tagOrId arg?
+       
+            pathName select adjust tagOrId index
+            pathName select clear
+            pathName select from tagOrId index
+            pathName select item
+            pathName select to tagOrId index
+
+	### BUGS
+
+	image - nw anchor is off in y by size difference between y and ysquare of image.
+			check what is returned for size and position of quad.
+
+    FIX UP Resizing Window Abberation:
+		FIX Missing <Configure> Event
+
+   ### TO DO
+
+		add Perspective and Ortho on reshape to make DLists and 
+		add Otho to Canvas List
+		merge arc and oval
+       
+}
+
+proc //abbrev {args} {
+ foreach proc $args {
+  set cmd {}
+  foreach c [split $proc {}] {
+	append cmd $c
+	if {$cmd eq $proc} {continue}
+	set procs [info procs $cmd*]
+	lDel procs $proc
+	if {[llength $procs ] < 1 } {
+		alias $cmd $proc
+#		puts "alias $cmd $proc"
+	}
+  }
+ }
+}
+
+
+
+

@@ -1,0 +1,165 @@
+#
+#
+# (c) Philip Quaife 2005, 2007
+#
+# Routines to handle Textures
+#
+
+proc teximage {path image file args} {
+	upvar [nc]::$path canvas
+
+	image create photo $image -file $file
+	eval [nc]::maketexturefromimage $path $image $args
+}
+
+
+proc maketexturefromimage {path image args} {
+	upvar [nc]::$path canvas
+
+
+	if {[info exists canvas(texture,$image,id)]} {
+		return [$path ~ $image]
+	}
+	set size  [::image width $image]
+	set sizeh [::image height $image]
+
+	set canvas(texture,$image,width) $size
+	set canvas(texture,$image,height) $sizeh
+
+	set sqrw [expr {int(pow(2,int((log($size) / log(2)+log(2)))))}]
+	set sqrh [expr {int(pow(2,int((log($sizeh) / log(2)+log(2)))))}]
+
+	set i $image
+	if {$sqrw != $size || $sqrh != $sizeh} {
+		set dif [expr {$sqrh - $sizeh}]
+		::image create photo $image/tex -width $sqrw -height $sqrh
+		$image/tex copy $image -from 0 0 $size $sizeh -to 0 $dif $size [expr {$sizeh+$dif}]
+		set i $image/tex
+	}
+
+	set canvas(texture,$image,sizew) $sqrw
+	set canvas(texture,$image,sizeh) $sqrh
+
+	set canvas(texture,$image,maxw) [expr { $size / double($sqrw)}]
+	set canvas(texture,$image,maxh) [expr {  $sizeh / double($sqrh)}]
+
+
+    set texName [tcl3dVector GLuint 1]
+
+	$path togl makecurrent
+    glBindTexture GL_TEXTURE_2D 0
+    glGenTextures 1 $texName
+    set texid [$texName get 0]
+	$texName delete
+	set vector [tcl3dVectorFromPhoto $i]
+	set z [tcl3dPhotoChans $i]
+
+	glNewList [$path ~= $image] GL_COMPILE_AND_EXECUTE
+	    glBindTexture GL_TEXTURE_2D $texid
+		glEnable GL_TEXTURE_2D
+	    glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_S $::GL_REPEAT
+        glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_T $::GL_REPEAT
+
+        glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER $::GL_NEAREST
+        glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER $::GL_NEAREST
+
+        glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE $::GL_REPLACE
+	glEndList
+    glBindTexture GL_TEXTURE_2D $texid
+    glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE $::GL_REPLACE
+
+    glPixelStorei GL_UNPACK_ALIGNMENT 1
+	glGetError
+
+    glTexImage2D GL_TEXTURE_2D 0 4 $sqrw $sqrh 0 \
+        GL_RGBA \
+		GL_UNSIGNED_BYTE $vector
+
+
+	$vector delete
+	if {$i ne $image} {image delete $i}
+
+   set canvas(texture,$image,id) $texid
+
+
+	if {[llength $args] } {
+		uplevel 1 $path textureconfigure $image $args
+	}
+
+	if {! [$path ~? NOTEXTURE] } {
+	}
+	glDisable GL_TEXTURE_2D
+    glBindTexture GL_TEXTURE_2D 0
+
+	$path ~ $image
+}
+
+proc textureconfigure {path image args} {
+	upvar [nc]::$path canvas
+
+	$path togl makecurrent
+	glNewList [$path ~ $image] GL_COMPILE
+		glBindTexture GL_TEXTURE_2D $canvas(texture,$image,id)
+		glEnable GL_TEXTURE_2D
+	foreach arg $args {
+		switch [set cmd [lindex $arg 0]] {
+			REPEAT -
+			CLAMP -
+			CLAMP_TO_EDGE {
+			   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_S [set ::GL_$cmd]
+			   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_T [set ::GL_$cmd]
+			}
+			LINEAR -
+			NEAREST -
+			MIPMAP_LINER -
+			MIPMAP_NEAREST {
+			   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER [set ::GL_$cmd]
+			   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER [set ::GL_$cmd]
+			}
+			LINEAR_MIPMAP_LINEAR -
+			LINEAR_MIPMAP_NEAREST -
+			NEAREST_MIPMAP_LINEAR -
+			NEAREST_MIPMAP_NEAREST {
+			   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER [set ::GL_$cmd]
+			}
+
+			MODULATE -
+			REPLACE  - 
+			BLEND -
+			DECAL {
+			  glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE [set ::GL_$cmd]
+			}
+			COLOR -
+			COLOUR {
+			  glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE $::GL_BLEND [lindex $arg 1]
+			}
+
+			EYE_LINEAR -
+			OBJECT_LINEAR -
+			SPHERE_MAP {
+				glTexGeni GL_S GL_TEXTURE_GEN_MODE [set ::GL_$cmd]
+   				glTexGeni GL_T GL_TEXTURE_GEN_MODE [set ::GL_$cmd]
+				glEnable GL_TEXTURE_GEN_S
+				glEnable GL_TEXTURE_GEN_T
+			}
+			default {
+				error "Texture/mode $arg unknown texture option"
+			}
+		}
+	}
+	glEndList
+	list
+}
+
+proc textureinfo {path image} {
+	upvar [nc]::$path canvas
+
+	foreach v {width height sizew sizeh maxw maxh} {
+		lappend ret $canvas(texture,$image,$v) 
+	}
+	set ret
+}
+
+
+
+

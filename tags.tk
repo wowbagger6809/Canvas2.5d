@@ -1,0 +1,266 @@
+
+#
+#
+# QCanvas2d - tag handling
+#
+# Copyright © Philip Quaife 1 Jan 2006
+#
+
+proc gettags {path tagid} {
+	upvar [nc]::$path canvas
+	upvar [nc]::$path/items items
+	upvar [nc]::$path/tags tags
+
+	set id [lindex [/tagid $path $tagid] 0]
+	if {$id eq {}} {return {}}
+	set items($id,-tags)
+}
+
+proc /tagset {path tagid newtags} {
+	upvar [nc]::$path/tags tags
+	upvar [nc]::$path/items item
+
+	set ids [/tagid $path $tagid]
+
+	foreach id $ids {
+		if {[info exists item($id,-tags)]} {
+			foreach t $item($id,-tags) {if {[lsearch $newtags $t] == -1} {lDel tags($t) $id} }
+		}
+		foreach t $newtags {lAdd tags($t) $id}
+	}
+	list
+}
+
+proc /tagid {path tagid} {
+	if {[string is integer $tagid]} {
+		upvar [nc]::$path/items item
+		if {[info exists item($tagid,type)]} {return $tagid}
+		return {}
+	}
+	if {$tagid eq {all} } {
+		upvar [nc]::$path/items item
+		return $item(all)
+	}
+	upvar [nc]::$path/tags tags
+	if { [info exists tags($tagid)] } {return $tags($tagid) }
+	if {! [info exists tags(expr,$tagid)] } {
+	   set tags(expr,$tagid) [/expr $tagid]
+	}
+	if {[llength $tags(expr,$tagid)] == 1} {return {}}
+
+	/exprrun $path [set tags(expr,$tagid) $tags(expr,$tagid)]
+}
+
+proc dtag {path tagid tag} {
+	upvar [nc]::$path/tags tags
+	upvar [nc]::$path/items item
+	if {![info exist tags($tag)]} {return}
+	foreach id [/tagid $path $tagid] {
+		puts "DelT $tag -> $id"
+		lDel tags($tag) $id
+		lDel item($id,-tags) $tag
+	}
+	if {[llength $tags($tag)] == 0 } {
+		array unset tags $tag
+	}
+	list
+}
+
+proc atag {path tagid tag} {
+	upvar [nc]::$path/tags tags
+	upvar [nc]::$path/items item
+	foreach id [/tagid $path $tagid] {
+		lAdd tags($tag) $id
+		lAdd item($id,-tags) $tag
+	}
+	list
+}
+
+proc updcurrent {path idlist} {
+	upvar [nc]::$path/tags tags
+	upvar [nc]::$path/items item
+	if {[info exists tags(current)]} {
+		set id $tags(current)
+		lDel item($id,-tags) current
+	}
+	set id [lindex $idlist end]
+	if {$id ne {}} {
+		lAdd item($id,-tags) current
+		set tags(current) $id
+	}
+}
+
+proc addtag {path tag args} {
+	upvar [nc]::$path/tags tags
+	upvar [nc]::$path/items item
+	foreach id [uplevel 1 $path find $args] {
+puts "AddT $tag -> $id"
+		lAdd tags($tag) $id
+		lAdd item($id,-tags) $tag
+	}
+	list
+}
+
+proc /intersects {x1 y1 x2 y2 box} {
+	lassign $box bx1 by1 bx2 by2
+
+	if {$x1 >= $bx1 && $x1 <= $bx2 && $y1 >= $by1 && $y1 <= $by2} {return 1}
+	if {$x2 >= $bx1 && $x2 <= $bx2 && $y2 >= $by1 && $y2 <= $by2} {return 1}
+	return 0
+}
+
+proc /search {path box1} {
+	upvar [nc]::$path/items items
+
+	lassign $box1 x1 y1 hx hy
+	set list [list]
+	foreach id $items(all) {
+		if {[/intersects $x1 $y1 $x1 $y1 [bbox $path $id]] } {
+				lappend list $id
+		}
+	}
+	return $list
+}
+
+proc find {path how args} {
+	upvar [nc]::$path canvas
+	upvar [nc]::$path/items items
+	upvar [nc]::$path/tags tags
+
+	switch -glob $how {
+		w* {
+			return [/tagid $path [lindex $args 0]]
+		}
+		cl* {
+			#FIXME: Must return something even if no hits.
+			# Scan coords rather than using pick
+			set halo [expr {[llength $args] ? [lindex $args 0] : 1}]
+			foreach {x1 y1 hx hy} $args {break}
+#			set idlist [pickObject $path $x1 $y1 $halo $halo]
+			set idlist [/search $path $args ]
+			# FIXME: process optional ?start? argument
+			return [lindex $idlist end]
+
+		}
+		ov* {
+			# Scan coords rather than using pick
+#			foreach {x1 y1 x2 y2} $args {break}
+#			lassign $args x1 y1
+#			set list [pickObject $path $x1 $y1 [expr {$x2 - $x1}] [expr {$y2-$y1}] ]
+			return [/search $path $args ]
+		}
+		en* {
+			### FIXME: Filter out items with vertexes outside region
+			# Scan coords rather than using pick
+			foreach {x1 y1 x2 y2} $args {break}
+			set list [pickObject $path $x1 $y1 [expr {$x2 - $x1}] [expr {$y2-$y1}] ]
+			return $list
+		}
+		ab* {
+			### FIXME: scan vlist for item's dlist.
+		}
+		be* {
+			### FIXME: scan vlist for item's dlist.
+		}
+		all {
+			return $items(all)
+		}
+	}
+}
+
+
+proc /expr {txt} {
+
+	set txt [string trim $txt]
+	set op {}
+	set left {}
+	set arg {}
+	set expr {}
+	set not 0
+	set p 0
+	while {[set c [string range $txt $p $p]] ne {}} {
+		incr p
+		switch -- $c {
+			& - | {
+				set c2 [string range $txt $p $p]
+				if {$c2 ne $c} {
+					append arg $c
+				} else {
+					if {$op ne {} } {
+						if {$not} {set arg [list ! $arg {}]}
+						set expr [list $op $arg $left]
+						set left $expr
+						set op $c
+						set not 0
+					} else {
+					  set left $arg
+					  set op $c
+					}
+					set arg {}
+					incr p
+				}
+			}
+			! - # {
+				set not 1
+
+			}
+			( {
+				set level 1
+				set s $p
+				while {[set c [string range $txt $p $p]] ne {} } {
+					incr p
+					if {$c eq {(} } {incr level}
+					if {$c eq {)} } {incr level -1; if {$level == 0} {break} }
+				}
+				set sub [string range $txt $s [expr {$p -2}]]
+				set arg [/expr $sub]
+			}
+			default { append arg $c}
+
+		}
+	}
+	if {$op ne {} || $arg ne {} } {
+		if {$not} {set arg [list ! $arg {}]}
+		if {$op ne {} } {
+			set expr [list $op $arg $left]
+		} else {
+			set expr $arg
+		}
+	}
+	set expr
+}
+
+proc /exprrun {path expr} {
+
+	if {[llength $expr] == 1} {
+		return [/tagid $path $expr]
+	}
+	foreach {op left right} $expr {
+		switch $op {
+			& {return [/union [/exprrun $path $left] [/exprrun $path $right]]
+			}
+			| {	return [concat [/exprrun $path $left] [/exprrun $path $right]]
+			}
+			! {	return [/not [/exprrun $path $left] [/exprrun $path all]]
+			}
+		}
+	}
+}
+
+proc /not {tag all} {
+
+	foreach t $tag {lDel all $t}
+	set all
+}
+
+
+proc /union {t1 t2} {
+	set union {}
+	foreach t $t1 {
+		if {[lsearch -exact $t2 $t] != -1} {lappend union $t}
+	}
+	set union
+}
+
+
+

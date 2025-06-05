@@ -1,0 +1,612 @@
+#
+# © Philip Quaife 2005, 2007
+#
+# Routines to make Textured text quads
+#
+# QCanvas2d - TexFont routines
+#
+
+
+alias //loadfont-qfnt //loadtexfont qfnt 
+alias //loadfont-txf  //loadtexfont txf
+
+proc //loadtexfont {type path fontname fontsize fontface} {
+
+	puts "LF: $path"
+	set fontfile [string tolower $fontname-$fontface.$type]
+	set file [fontfile $path $fontfile]
+	if {$file eq {}} {return {}}
+
+	upvar [nc]::$path/$fontname-$fontsize-$fontface font
+	upvar [nc]::font/$fontfile gblfont
+
+	if {[info exists font(hdr,id)]} {
+	 return $font(hdr,id)
+	}
+	if {! [info exists gblfont(hdr,id)]} {
+	 puts "Loading $fontfile"
+	 //parsetexfont-$type [//readfontfile $file] gblfont 
+	 set gblfont(hdr,fontface) $fontface
+	 set gblfont(hdr,fontfamily) $fontname
+	 set gblfont(fontfile) $fontfile
+	 set gblfont(hdr,master) [nc]::font/$fontfile
+	}
+	puts "Cfg $fontname-$fontsize-$fontface"
+	array set font [array get gblfont hdr,*]
+	set font(hdr,fontsize) $fontsize
+	set font(hdr,fontname) "$fontname $fontsize $fontface"
+	/maketexturefromtexfont $path $type font
+	set font(hdr,scale) [expr {$fontsize / 72.0 * [winfo fpixels $path 1i] / $font(hdr,maxh)}]
+	return $font(hdr,id)
+}
+
+
+proc /maketexturefromtexfont {path type fontname} {
+	upvar [nc]::$path/togl canvas
+
+	upvar 1 $fontname font
+
+	puts "load font $fontname ($type)"
+	$path/togl makecurrent
+
+	glBindTexture GL_TEXTURE_2D 0
+    glPixelStorei GL_UNPACK_ALIGNMENT 1
+    set texName [tcl3dVector GLuint 1]
+    glGenTextures 1 $texName
+	set texID [$texName get 0]
+	$texName delete
+
+	glNewList [$path ~= $font(hdr,fontname)] GL_COMPILE_AND_EXECUTE
+	 glEnable GL_TEXTURE_2D
+	 glBindTexture GL_TEXTURE_2D $texID
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_S $::GL_CLAMP
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_T $::GL_CLAMP
+
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER $::GL_LINEAR
+     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER $::GL_LINEAR
+
+     glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE $::GL_MODULATE
+	glEndList
+	glBindTexture GL_TEXTURE_2D $texID
+	glAlphaFunc GL_GREATER 0.0
+
+   if {0} {
+    gluBuild2DMipmaps GL_TEXTURE_2D $GL_INTENSITY4 \
+        $font(hdr,width) $font(hdr,height)
+        GL_LUMINANCE_ALPHA GL_UNSIGNED_BYTE $font(hdr,teximg)
+   } else {
+    glTexImage2D GL_TEXTURE_2D  0  $::GL_INTENSITY4 \
+       $font(hdr,width) $font(hdr,height) 0    \
+       GL_LUMINANCE_ALPHA GL_UNSIGNED_BYTE $font(hdr,teximg)
+	}
+
+#	$togl texture register $fontname $texID $font(hdr,width) $font(hdr,height) $font(hdr,width) $font(hdr,height)
+
+	set canvas(texture,$fontname,sizew) $font(hdr,width)
+	set canvas(texture,$fontname,sizeh) $font(hdr,height)
+	set canvas(texture,$fontname,width) $font(hdr,width)
+	set canvas(texture,$fontname,height) $font(hdr,height)
+
+	set canvas(texture,$fontname,maxw) $font(hdr,width)
+	set canvas(texture,$fontname,maxh) $font(hdr,height)
+	set canvas(texture,$fontname,id) $texID
+
+	glBindTexture GL_TEXTURE_2D 0
+
+	set font(hdr,id) $texID
+	set canvas(font,$fontname,texid) $texID
+}
+
+
+proc //parsetexfont-qfnt {fontdata fontname} {
+	upvar 1 $fontname font
+
+	set x [string first \x1a $fontdata]
+	set head [split [string range $fontdata 0 $x] \n]
+	foreach {- len1} [lindex $head 1] {break}
+	foreach {- len2} [lindex $head 2] {break}
+	puts "Loading qfont from data ([lindex $head 0]) $len1 / $len2 - $x"
+	incr x
+	::array set gblfont [zlib inflate [string range $fontdata $x [expr {$x + $len1 -1}]]]
+	set data [zlib inflate [string range $fontdata [expr {$x + $len1 }] end]]
+	set gblfont(hdr,teximg) [tcl3dVectorFromByteArray GLuint [zlib inflate [string range $fontdata [expr {$x + $len1 }] end]]]
+	set gblfont(hdr,type) txf
+	array set font [array get gblfont]
+}
+
+proc //parsetexfont-txf {data array} {
+	upvar 1 $array thearray
+
+	if {[string range $data 0 3] ne "\377txf" } {
+		puts {Not a texfont file}
+		return -code error  -errorinfo "Not a texfont file"
+	}
+
+	array set thearray {
+	little,header IIIIII
+	big,header	 iiiiii
+	little,ginfo SccccccSS
+	big,ginfo	 sccccccss
+	}
+
+	binary scan $data {x4I} end
+	set swap [expr {$end != 0x78563412? {little} : {big} }]
+
+	set x [\
+		binary scan $data x8$thearray($swap,header) format width height ascent descent glyphs \
+	]
+	set format [expr {$format ? {bitmap} : {char}}]
+	array set thearray [list hdr,format $format hdr,width $width hdr,height $height hdr,ascent $ascent hdr,descent $descent hdr,glyphs $glyphs]
+
+	set xstep [expr {0.5 / $width}]
+	set ystep [expr {0.5 / $height}]
+	set tw [expr {double($width)}]
+	set th [expr {double($height)}]
+	set maxw -1
+	set maxh -1
+	set thearray(Chars) {}
+	set skip 32
+	for {set i 0} {$i < $glyphs} {incr i} {
+		binary scan $data x$skip$thearray($swap,ginfo) c w h xo yo advance descend  x y
+		if {$w > $maxw} {set maxw $w}
+		if {$h > $maxh} {set maxh $h}
+		set char [format %c [expr {$c < 0 ? 256 + $c : $c}]]
+		append thearray(Chars) $char
+		incr skip 12
+		foreach v {w h xo yo x y advance descend} {
+			set thearray($char,$v) [set $v]
+		}
+		set thearray($char,t0) [list [expr {$x / $tw + $xstep}] [expr {$y / $th + $ystep}]]
+		set thearray($char,v0) [list $xo $yo]
+
+		set thearray($char,t1) [list [expr {($x+$w) / $tw + $xstep}] [expr {($y) / $th + $ystep}]]
+		set thearray($char,v1) [list [expr {$xo + $w}] $yo]
+
+		set thearray($char,t2) [list [expr {($x+$w) / $tw + $xstep}] [expr {($y+$h) / $th + $ystep}]]
+		set thearray($char,v2) [list [expr {$xo + $w}] [expr {$yo + $h}]]
+
+		set thearray($char,t3) [list [expr {($x) / $tw + $xstep}] [expr {($y+$h) / $th + $ystep}]]
+		set thearray($char,v3) [list $xo [expr {$yo + $h}]]
+
+	}
+	set thearray(hdr,maxw) $maxw
+	set thearray(hdr,maxh) $maxh
+
+	set texdata [string range $data $skip end]
+	set teximg [tcl3dVector GLubyte [expr {2 * $width * $height}]]
+	switch $format {
+	char {
+	  binary scan $texdata c* data
+
+      for {set i 0} { $i < $width * $height } {incr i} {
+			set char [lindex $data $i]
+			if {$char < 0 } {set char [expr {256 + $char}] }
+			GLubyte_setitem $teximg [expr {$i * 2}] [expr {$char > 127 ? $char : 0}]
+			GLubyte_setitem $teximg [expr {$i * 2 + 1}] [expr {$char > 0 ? $char : 0}]
+      }
+	 puts "Read char tex font"
+	}
+
+	bitmap {
+	set stride [expr {($width+7) >> 3}]
+	set thearray(hdr,stride) $stride
+
+
+  # Always use alpha+colour
+  if {1} {
+    for {set i  0} {$i < $height} {incr  i} {
+      for {set j  0} {$j < $width} {incr j} {
+		set pos [expr {$i * $stride + ($j >> 3)}]
+		binary scan [string range $texdata $pos $pos] c char
+		set char [expr {$char < 0 ? 256 + $char : $char}]
+        if { $char & (1 << ($j & 7)) } {
+          #puts "$i,$j set to 1"
+			GLubyte_setitem $teximg [expr {($i * $width + $j) * 2}] 255
+			GLubyte_setitem $teximg [expr {($i * $width + $j) * 2 + 1}] 255
+           }
+        }
+      }
+  } else {
+    for {set i  0} {$i < $height} {incr  i} {
+      for {set j  0} {$j < $width} {incr j} {
+		set pos [expr {$i * $stride + ($j >> 3)}]
+		binary scan [string range $texdata $pos $pos] c char
+		set char [expr {$char < 0 ? 256 + $char : $char}]
+           if { $char & (1 << ($j & 7)) } {
+			GLubyte_setitem $teximg [expr {($i * $width + $j)}] 255
+          }
+        }
+      }
+  }
+	}
+	default {
+		error "Unknown txf font format $format"
+	}
+	}
+	
+    set thearray(hdr,teximg) $teximg
+	set thearray(hdr,teximg,size) [expr {2 * $width * $height}]
+
+	list
+}
+
+
+proc x {v} {
+	for {set i  0} {$i < 256} {incr i} {
+	for {set j  0} {$j < 256} {incr j} {
+	puts "$i,$j [$v get [expr {$i*256+$j}]]"
+	}
+	}
+}
+
+
+proc RenderGlyph {path char {colours {}} {fontname default} {facing Front} {xinc 0} {yinc 0} } {
+	upvar 1 $fontname font
+
+  glBegin GL_QUADS
+	RenderChar$facing $char font $xinc $yinc $colours
+  glEnd
+  set font($char,advance)
+}
+
+proc RenderCharFront {path char {fontname default} {xinc 0} {yinc 0} colours} {
+	upvar 1 $fontname font
+
+  set idx -1
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glMultiTexCoord2f GL_TEXTURE1 0 0
+  glTexCoord2fv $font($char,t0)
+  glVertex2fv [txfAdj $font($char,v0) $xinc $yinc]
+
+  set c [lindex $colours [incr idx]]
+  if {[lindex $colours] > 1 && $c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glMultiTexCoord2f GL_TEXTURE1 1 0
+  glTexCoord2fv $font($char,t1)
+  glVertex2fv [txfAdj $font($char,v1) $xinc $yinc]
+
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glMultiTexCoord2f GL_TEXTURE1 1 1
+  glTexCoord2fv $font($char,t2)
+  glVertex2fv [txfAdj $font($char,v2) $xinc $yinc]
+
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glMultiTexCoord2f GL_TEXTURE1 0 1
+  glTexCoord2fv $font($char,t3)
+  glVertex2fv [txfAdj $font($char,v3) $xinc $yinc]
+
+  set font($char,advance)
+
+}
+
+proc RenderCharBackFront {path char {fontname default} {xinc 0} {yinc 0} {colours {}} } {
+	upvar 1 $fontname font
+
+  set idx -1
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glTexCoord2fv $font($char,t2)
+  glVertex2fv [txfAdj $font($char,v3) $xinc $yinc]
+
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glTexCoord2fv $font($char,t3)
+  glVertex2fv [txfAdj $font($char,v2) $xinc $yinc]
+
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glTexCoord2fv $font($char,t0)
+  glVertex2fv [txfAdj $font($char,v1) $xinc $yinc]
+
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glTexCoord2fv $font($char,t1)
+  glVertex2fv [txfAdj $font($char,v0) $xinc $yinc]
+
+  set font($char,advance)
+
+}
+
+proc RenderCharBack {path char {fontname default} {xinc 0} {yinc 0} {colours {}} } {
+	upvar 1 $fontname font
+
+  set idx -1
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glTexCoord2fv $font($char,t3)
+  glVertex2fv [txfAdj $font($char,v3) $xinc $yinc]
+
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glTexCoord2fv $font($char,t2)
+  glVertex2fv [txfAdj $font($char,v2) $xinc $yinc]
+
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glTexCoord2fv $font($char,t1)
+  glVertex2fv [txfAdj $font($char,v1) $xinc $yinc]
+
+  set c [lindex $colours [incr idx]]
+  if {$c ne {} && $c ne {-} } {
+	glColor4fv $c
+  }
+  glTexCoord2fv $font($char,t0)
+  glVertex2fv [txfAdj $font($char,v0) $xinc $yinc]
+
+  set font($char,advance)
+
+}
+
+
+proc txfAdj {point x y} {list [expr {[lindex $point 0] + $x}] [expr {[lindex $point 1] + $y}]}
+
+proc RenderString {path colours txt {facing Front} {fontname default}} {
+ upvar [nc]::$path/[join $fontname -] fontx
+ upvar $fontx(hdr,master) font
+ set proc RenderChar$facing
+ set width 0
+ set height 0
+ set cidx 0
+ 
+ foreach char [split $txt {}] {
+	if {$char == "\t" } {set char " "}
+	if {[string first $char $font(Chars)] == -1 } {
+		binary scan $char c x
+		puts "Unknown char $char:($x)"
+		set char " "
+	}
+	foreach {w h a d} [txfTM $path $char font] {break}
+	lappend charpath $char $width 
+	incr width $a
+	if {$h > $height} {
+		set height $h
+	}
+ }
+
+ set xinc [expr {-$width / 2}]
+ set yinc [expr {-$height / 2}]
+
+ glBegin GL_QUADS
+
+if {1} {
+  foreach char [split $txt {}] {
+	if {[string first $char $font(Chars)] == -1 } {
+		set char " "
+	}
+	foreach {w h a d} [txfTM $path $char font] {break}
+	if {$w > 0 && $h > 0} {
+	    $proc $path $char font $xinc $yinc $colours
+	}
+	incr xinc $a
+  }
+}
+ glEnd
+ list $width $height
+}
+
+
+proc txfTM {path char {fontname default} } {
+	upvar 1 $fontname font
+
+	list $font($char,w) $font($char,h) $font($char,advance) $font($char,descend)
+}
+
+
+proc tex/fmt {l} {
+	foreach v $l {lappend ret [format %.2f $v]}
+	set ret
+}
+
+proc tex/scale {l a b} {
+	set scale [expr {double($a) / double($b)}]
+	foreach v $l {lappend ret [expr {$v * $scale}]}
+	set ret
+}
+
+proc Text2Path {togl fontname size string callback args} {
+	variable $togl/togl
+	upvar 0 $togl Font
+
+	Font/load $togl $fontname
+
+	upvar #0 $fontname font
+
+	# hdr,ascent
+	# hdr,descent
+	set i -1
+	glBegin GL_QUADS
+	foreach char [split $string {}] {
+		incr i
+
+		set vtxlist [list ]
+		foreach v {0 1 2 3} {
+			lappend vtxlist [lindex $font($char,v$v) 0] [lindex $font($char,v$v) 1] 0
+		}
+		set vtxlist [tex/scale $vtxlist 1  26]
+
+		foreach {points normals colours} [$callback $string $char $i $vtxlist $args] {break}
+
+		puts "$char $vtxlist :  [tex/fmt $points]"
+		puts "   norm:  ($normals)"
+
+	  	glNormal3fv $normals
+		set xinc 0
+		set yinc 0
+		  set idx -1
+
+	    foreach {x y z} $points t {t0 t1 t2 t3} c $colours {
+			if {$c ne {} } {
+			puts "$x,$y,$z - $c"
+				glColor3fv $c
+			    glMaterialfv GL_FRONT GL_AMBIENT_AND_DIFFUSE $c
+			}
+			 glTexCoord2fv $font($char,$t)
+			 glVertex3f $x $y $z
+		}
+		continue
+
+	}
+	glEnd
+}
+
+proc Font/width {togl fontname chars} {
+	variable $togl/togl
+	upvar 0 $togl Font
+
+	upvar #0 $font font
+
+	set w 0
+	foreach char $chars {
+		set w [expr {$w + $font($char,w)}]
+	}
+	set w
+}
+
+
+proc Font/height {togl fontname chars} {
+	variable $togl/togl
+	upvar 0 $togl Font
+
+	upvar #0 $font font
+
+	set h 0
+	foreach char $chars {
+		set h [expr {$h + $font($char,h)}]
+	}
+	set h
+}
+
+
+proc Font/substr {togl ratio chars} {
+	variable $togl/togl
+	upvar 0 $togl Font
+
+	set pos [expr {int($ratio * [string length $chars])}]
+	string range $chars $pos $pos
+}
+
+
+proc Font/texcoords {togl fontname char} {
+	variable $togl/togl
+	upvar 0 $togl Font
+
+	upvar #0 $fontname font
+
+#	foreach {w h tw th mw mh} [$togl texture info $fontname] {break}
+
+	list $font($char,t0) $font($char,t1) $font($char,t2) $font($char,t3)
+}
+
+
+proc Font/vertices {togl fontname char} {
+	variable $togl/togl
+	upvar 0 $togl Font
+
+	upvar #0 $fontname font
+
+#	foreach {w h tw th mw mh} [$togl texture info $fontname] {break}
+
+	concat $font($char,v0) 0 $font($char,v1) 0 $font($char,v2) 0 $font($char,v3) 0
+}
+
+
+
+proc Font/txt2path {togl msg fontname args} {
+	variable $togl/togl
+	upvar 0 $togl Font
+
+	Font/load $togl $fontname
+
+	foreach {items vtx nrmls cols texs} [makePath $togl [concat $args text [list $msg] maxsteps [string length $msg] font $fontname]] {break}
+
+	set  cmd "MTexture $fontname\n"
+	append cmd "glPushMatrix\n"
+	foreach i $items v $vtx n $nrmls c $cols t $texs {
+		append cmd "## Char $i\n"
+		append cmd "glBegin GL_QUADS\n"
+		append cmd "glNormal3f $n\n"
+		set vi 0
+		foreach {x y z} $v  {
+			set id 0
+			foreach ti $t {
+				if {$id == 0} {
+					append cmd "TexCoord [lindex $ti $vi]\n"
+				} else {
+					append cmd "MTexCoord $id [lindex $ti $vi]\n"
+				}
+				incr id
+			}
+			set ci [lindex $c $vi]
+			if {$ci ne {}} {
+				append cmd "Colour $ci\n"
+			}
+			append cmd "glVertex3f $x $y $z\n"
+			incr vi
+		}
+		append cmd "glEnd\n"
+	}
+	for {set id 0} {$id < [llength [lindex $texs 0]]} {incr id} {
+		append cmd "glActiveTexture GL_TEXTURE$id\n"
+		append cmd "glBindTexture GL_TEXTURE_2D 0\n"
+		append cmd "glDisable GL_TEXTURE_2D\n"
+		append cmd "glDisable GL_TEXTURE$id\n"
+	}
+	append cmd "glActiveTexture GL_TEXTURE0\n"
+	append cmd "glPopMatrix\n"
+	append cmd "\n\n"
+	puts "len vtx [llength $vtx] nrml [llength $nrmls] cols [llength $cols] texes [llength $texs]"
+
+	set cmd
+
+}
+
+#
+# QFonts are compressed texfonts
+#
+proc qfont/save {path fontname {filename {}} } {
+	package require zlib
+	upvar [nc]::$path/$fontname font
+
+	set len $font(hdr,teximg,size)
+	set vec $font(hdr,teximg)
+	if {$filename eq {} } {set filename $fontname}
+	set f [open $filename.qfnt w] 
+	set data [zlib deflate [array get font]]
+	set data2 [zlib deflate [tcl3dVectorToByteArray $vec $len]]
+	puts $f "#QFont $fontname"
+	puts $f "#HeadLen: [string length $data]"
+	puts $f "#DataLen: [string length $data2]"
+	fconfigure $f -translation binary
+	puts -nonewline $f "\x1a"
+	puts -nonewline $f $data
+	puts -nonewline $f $data2
+	close $f
+	list
+}
+
+
+

@@ -1,0 +1,273 @@
+#
+#
+# © Philip Quaife 2005
+#
+# Routines to handle DrawArrays and CallLists
+#
+
+# FIX ME: prevent dlist being added twice
+proc vlist {path cmd name args} {
+	upvar [nc]::$path/togl canvas
+	switch $cmd {
+		new -
+		create {
+#puts "VL: $path"
+			$path ~= $name
+			set size [lindex $args 0]
+			if {$size eq {} } {set size 100}
+			catch {$canvas(vlist,$name) delete}
+			set canvas(vlist,$name) [new_GLint $size]
+			set canvas(vlist,$name,size) $size
+			set canvas(vlist,$name,onlist) {}
+			set canvas(vlist,$name,hidden) {}
+			lAdd canvas(vlists) $name
+		}
+
+		add {
+			set dlist [lindex $args 0]
+			set pos [lindex $args 1]
+			switch $pos {
+				before {
+					set who [lindex $args 2]
+					if {$who eq {} } {
+						set p 0
+					} else {
+						set p [lsearch -exact $canvas(vlist,$name,onlist) $who]
+					}
+					if {$p == -1 } {return [vlist $path add $name $who]}
+					set canvas(vlist,$name,onlist) [linsert $canvas(vlist,$name,onlist) $p $dlist]
+				}
+				after {
+					set who [lindex $args 2]
+					set p [lsearch -exact $canvas(vlist,$name,onlist) $who]
+					if {$p == -1 } {return [vlist $togl add $name $who]}
+					set canvas(vlist,$name,onlist) [linsert $canvas(vlist,$name,onlist) [incr p] $dlist]
+				}
+				default {
+					lAdd canvas(vlist,$name,onlist) $dlist
+					return [vlist/subst $path $name [expr {[llength $canvas(vlist,$name,onlist)]-1}] $dlist]
+				}
+			}
+		}
+		list {
+			return $canvas(vlist,$name,onlist)
+		}
+		delete -
+		del -
+		remove {
+			set dlist [lindex $args 0]
+			set p [lsearch -exact $canvas(vlist,$name,onlist) $dlist]
+			if {$p == -1 } {puts "$dlist not on list $name"; return 0}
+			set canvas(vlist,$name,onlist) [lreplace $canvas(vlist,$name,onlist) $p $p]
+		}
+
+		destroy {
+			glNewList [$path ~ $name] GL_COMPILE
+			glEndList
+			$canvas(vlist,$name) delete
+			unset canvas(vlist,$name,size)
+			unset canvas(vlist,$name,onlist)
+			return 1
+		}
+		vector {
+			return $canvas(vlist,$name)
+		}
+		hide {
+			lAdd canvas(vlist,$name,hidden) [lindex $args 0]
+
+		}
+		show {
+			lDel canvas(vlist,$name,hidden) [lindex $args 0]
+		}
+		default {
+			error "vlist unknown command $cmd, create add remove reorder destroy"
+		}
+	}
+	vlist/update $path $name
+}
+
+proc vlist/subst {path name pos id} {
+set t1 [cc]
+
+	upvar [nc]::$path/togl canvas
+	upvar 0 canvas(vlist,$name) vector
+	upvar 0 canvas(vlist,$name,size) size
+	upvar 0 canvas(vlist,$name,onlist) onlist
+
+	if {[llength $onlist] > $size} {
+		return [vlist/update $path $name]
+	}
+
+	GLint_setitem $vector $pos [~ $path $id]
+
+	$path/togl makecurrent
+	glNewList [$path ~ $name] GL_COMPILE
+	glCallLists [llength $onlist] GL_INT $vector
+	glEndList
+	set ::_vlist [expr {[cc] - $t1}]
+
+}
+
+proc vlist/update {path name} {
+set t1 [cc]
+
+	upvar [nc]::$path/togl canvas
+
+	upvar 0 canvas(vlist,$name) vector
+	upvar 0 canvas(vlist,$name,size) size
+	upvar 0 canvas(vlist,$name,onlist) onlist
+	upvar 0 canvas(vlist,$name,hidden) hidden
+
+	if {[llength $onlist] > $size} {
+		catch {delete_GLint $vector}
+		incr size $size
+		set vector [new_GLint $size]
+	}
+	set blank [$path ~ BLANK]
+	set idx 0
+	foreach d $onlist {
+		if {[lsearch -exact $hidden $d] == -1 } {
+			GLint_setitem $vector $idx [~ $path $d]
+		} else {
+			GLint_setitem $vector $idx $blank
+		}
+		incr idx
+	}
+set ::_vlist [expr {[cc] - $t1}]
+
+	$path/togl makecurrent
+	glNewList [$path ~ $name] GL_COMPILE
+	glCallLists [llength $onlist] GL_INT $vector
+	glEndList
+
+}
+
+proc raise {path tagid {who {}}} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+	if {$who ne {} } {
+		set who [lindex [/tagid $path $who] 0]
+		if {$who ne {}} {set who $items($who,dlist)}
+	}
+	set fnd 0
+	foreach id [/tagid $path $tagid] {
+		set fnd 1
+	upvar 0 canvas(vlist,$items($id,-group),onlist) onlist
+	 set dl $items($id,dlist)
+	 lDel onlist $dl
+	 set p [lsearch -exact $onlist $who]
+	 if {$p == -1} {
+		lappend onlist $dl
+	 } else {
+		set onlist [linsert $onlist [incr p] $dl]
+	 }
+	}
+	if {$fnd} {
+		vlist/update $path $items($id,-group)
+		$path idleupdate
+	}
+}
+
+proc lower {path tagid {who {}}} {
+	upvar [nc]::$path/togl canvas
+	upvar [nc]::$path/items items
+
+
+	if {$who ne {} } {
+		set who [lindex [/tagid $path $who] 0]
+		if {$who ne {}} {set who $items($who,dlist)}
+	}
+	foreach id [/tagid $path $tagid] {
+	upvar 0 canvas(vlist,$items($id,-group),onlist) onlist
+	 set dl $items($id,dlist)
+	 lDel onlist $dl
+	 set p [lsearch -exact $onlist $who]
+	 if {$p == -1} {
+		set onlist [linsert $onlist 0 $dl]
+	 } else {
+		set onlist [linsert $onlist $p $dl]
+	 }
+	}
+	vlist/update $path $items($id,-group)
+	$path idleupdate
+}
+
+
+
+#
+#
+# Draw Arrays
+#
+# FIXME WHAT ARE THESE?? Has this not been done ???
+#
+#  Check in GL what the difference between arrays and vectors are:
+#
+
+
+proc Array {togl cmd name args} {
+	variable $togl
+	upvar 0 $togl canvas
+
+	switch $cmd {
+		create {
+			set size [lindex $args 0]
+			if {$size eq {} } {set size 1000}
+			set canvas(vlist,$name) [Vector GLint $size]
+			set canvas(vlist,$name,size) $size
+			set canvas(vlist,$name,onlist) {}
+		}
+
+		add {
+			set dlist [lindex $args 0]
+			set pos [lindex $args 1]
+			switch $pos {
+				before {
+					set who [lindex $args 2]
+					set p [lsearch -exact $canvas(vlist,$name,onlist) $who]
+					if {$p == -1 } {return [canvas $togl add $name $who]}
+					set Vlist(vlist,$name,onlist) [linsert $canvas(vlist,$name,onlist) $p $dlist]
+				}
+				after {
+					set who [lindex $args 2]
+					set p [lsearch -exact $canvas(vlist,$name,onlist) $who]
+					if {$p == -1 } {return [canvas $togl add $name $who]}
+					set canvas(vlist,$name,onlist) [linsert $canvas(vlist,$name,onlist) [incr p] $dlist]
+				}
+				default {
+					lappend canvas(vlist,$name,onlist) $dlist
+				}
+			}
+		}
+		list {
+			return $canvas(vlist,$name,onlist)
+		}
+		remove {
+			set dlist [lindex $args 0]
+			set p [lsearch -exact $canvas(vlist,$name,onlist) $dlist]
+			if {$p == -1 } {return 0}
+			set canvas(vlist,$name,onlist) [lreplace $canvas(vlist,$name,onlist) $p $p]
+		}
+
+		reorder {
+		}
+
+		destroy {
+			glNewList [$canvas(Scene) ~ $name] GL_COMPILE
+			glEndList
+			canvas(vlist,$name) delete
+			unset Vlist(vlist,$name,size)
+			unset Vlist(vlist,$name,onlist)
+			return 1
+		}
+		default {
+			error "canvas unknown command $cmd, create add remove reorder destroy"
+		}
+	}
+
+	vlist/update $togl $name
+}
+
+
+
+

@@ -1,0 +1,238 @@
+#
+# © Philip Quaife 2005
+#
+# Routines to make picking
+#
+
+proc _k {a b} {set a}
+proc pickObject {path x y sizex sizey} {
+	variable selectBuffer
+	if {! [info exists selectBuffer]} {
+		set selectBuffer  [tcl3dVector GLuint 2048]
+	}
+	upvar [nc]::$path/togl canvas
+
+	if {$sizex == 0} {set sizex 1}
+	if {$sizey == 0} {set sizey 1}
+	if {$sizex > 1} {
+		set x [expr {$x - $sizex/2}]
+	}
+	if {$sizey > 1} {
+		set y [expr {$y - $sizey/2}]
+	}
+puts "Pick start"
+	$path/togl makecurrent
+    glSelectBuffer 2048 $selectBuffer
+    glRenderMode GL_SELECT
+
+    glMatrixMode GL_PROJECTION
+	glPushMatrix
+    glLoadIdentity
+    # create size pixel picking region near cursor location
+    gluPickMatrix $x  [expr {[lindex $canvas(viewport) 1] - $y}] $sizex $sizey $canvas(viewvector)
+	glOrtho 0 [lindex $canvas(viewport) 0] [lindex $canvas(viewport) 1] 0 -10000 10000
+    glMatrixMode GL_MODELVIEW
+	glPushMatrix
+	glLoadIdentity
+	glInitNames
+	glCallList [$path ~ Select]
+	glPopMatrix
+    glMatrixMode GL_PROJECTION
+	glPopMatrix
+    glMatrixMode GL_MODELVIEW
+    glFlush
+
+    set hits [glRenderMode GL_RENDER]
+
+	puts "Hits @${x}($sizex), ${y}($sizey) = $hits"
+	set ret [list]
+	if { $hits } {
+	    set objs [pickHits $hits $selectBuffer]
+#		foreach {id z} $objs {set ret [linsert [_k $ret [set ret {}]] 0 $id]}
+		foreach {id z} $objs {lappend ret $id}
+	}
+	set ret
+}
+
+
+#
+# Sort through hits
+#
+proc pickHits { hits selectBuffer} {
+	set ret {}
+    set count 0
+    for { set i 0 } { $i < $hits } { incr i } {
+        set names [$selectBuffer get $count]
+        incr count
+		set z1 [expr {double([$selectBuffer get $count]) / 0x7fffffff}]
+        incr count
+		set z2 [expr {double([$selectBuffer get $count]) / 0x7fffffff}]
+        incr count
+		if {$names != 1} {
+	        puts " number of names for hit idx $count = $names"
+			incr count $names
+			continue
+		}
+        set id [$selectBuffer get $count]
+		incr count $names
+		lappend ret $id [/restoreZ $z2]
+    }
+	set ret
+}
+
+proc pickBBox {path idlist {iso 0} } {
+
+	set x1 {}
+	foreach {x1 y1 z1 x2 y2 z2} [pickBBoxX $path $idlist $iso] {break}
+	if {$x1 eq {}} {
+		puts "No BBOX for $idlist"
+		return {}
+	}
+	puts "$x1,$y2 -- $x2 $y1"
+	set y1 [expr {$y1 * 10}]
+	set y2 [expr {$y2 * 10}]
+	set x1 [expr {$x1 * 10}]
+	set x2 [expr {$x2 * 10}]
+
+	set z1 [/restoreZ $z1]
+	set z2 [/restoreZ $z2]
+
+	list $x1 $y1 $z1 $x2 $y2 $z2
+}
+
+
+proc pickBBoxX {path idlist {iso 0} } {
+	variable feedBuffer
+
+	if {! [info exists feedBuffer]} {
+		set feedBuffer  [tcl3dVector GLfloat 8192]
+	}
+	upvar [nc]::$path canvas
+
+	$path togl makecurrent
+
+    glFeedbackBuffer  8192 GL_3D $feedBuffer
+    glRenderMode GL_FEEDBACK
+	glPushAttrib GL_ALL_ATTRIB_BITS
+
+
+	set vm 1000
+	set vm1 10000
+    glViewport 0 0 $vm $vm
+    glMatrixMode GL_PROJECTION
+	glPushMatrix
+	glLoadIdentity
+	glOrtho 0 $vm1 0 $vm1 0 -100
+    glMatrixMode GL_MODELVIEW
+	glPushMatrix
+	glLoadIdentity
+
+#	glCallList [$path ~ Modelview]
+#	glCallList [$path ~ CanvasView]
+
+	glDisable GL_CULL_FACE
+	glDisable GL_LIGHTING
+	glDisable GL_DEPTH_TEST
+	glPassThrough -1
+	foreach id $idlist {
+		glCallList $id
+	}
+	glPassThrough 0
+    glFlush
+
+    glMatrixMode GL_PROJECTION
+	glPopMatrix
+    glMatrixMode GL_MODELVIEW
+	glPopMatrix
+	glPopAttrib
+    set size [glRenderMode GL_RENDER]
+    glViewport 0 0 [winfo width $path] [winfo height $path]
+	bboxScanV $feedBuffer $size 1
+}
+
+
+proc /restoreZ {z} {expr {round(1000.0 -($z*1000))}}
+
+proc bboxScanV {buffer size {debug 0} } {
+    set count 0
+	set havecoords 0
+	set found 0
+	set ty ?
+	foreach v {x y z} {
+		set ${v}min  1E31
+		set ${v}max -1E31
+	}
+    while { $count < $size} {
+        set token [$buffer get $count]
+		set xyz [list]
+        if { $token == $::GL_PASS_THROUGH_TOKEN } {
+            set tok [$buffer get [incr count]]
+			if {$found && $tok == 0} {break}
+			if {! $found && $tok == -1} {incr found }
+			set ty "PASS_THROUGH $tok"
+        } elseif { $token == $::GL_POINT_TOKEN } {
+            set xyz     [$buffer get [incr count]]
+            lappend xyz [$buffer get [incr count]]
+            lappend xyz [$buffer get [incr count]]
+			set ty POINT
+        } elseif { $token == $::GL_LINE_TOKEN } {
+            set xyz     [$buffer get [incr count]]
+            lappend xyz [$buffer get [incr count]]
+            lappend xyz [restoreZ [$buffer get [incr count]]]
+            lappend xyz [$buffer get [incr count]]
+            lappend xyz [$buffer get [incr count]]
+            lappend xyz [$buffer get [incr count]]
+			set ty LINE
+
+        } elseif { $token == $::GL_LINE_RESET_TOKEN } {
+            set xyz     [$buffer get [incr count]]
+            lappend xyz [$buffer get [incr count]]
+            lappend xyz [restoreZ [$buffer get [incr count]]]
+            lappend xyz [$buffer get [incr count]]
+            lappend xyz [$buffer get [incr count]]
+            lappend xyz [$buffer get [incr count]]
+			set ty LINE_RESET
+
+        } elseif { $token == $::GL_POLYGON_TOKEN } {
+			set n [expr {int([$buffer get [incr count]])}]
+			set xyz [list]				
+			while {$n } {
+	            lappend xyz [$buffer get [incr count]]
+	            lappend xyz [$buffer get [incr count]]
+	            lappend xyz [$buffer get [incr count]]
+				incr n -1
+			}
+			set ty POLYGON
+	    } else {
+			error "unknown token $token"
+			break
+		}
+if {$debug} {	puts "ty $ty"}
+
+		foreach {x y z} $xyz {
+			set havecoords 1
+if {$debug} {puts "  --> $x $y $z "}
+			if {$x < $xmin} {set xmin $x}
+			if {$y < $ymin} {set ymin $y}
+			if {$z < $zmin} {set zmin $z}
+			if {$x > $xmax} {set xmax $x}
+			if {$y > $ymax} {set ymax $y}
+			if {$z > $zmax} {set zmax $z}
+		}
+	  if {0} {
+	   GL_BITMAP_TOKEN
+	   GL_DRAW_PIXEL_TOKEN or
+	   GL_COPY_PIXEL_TOKEN
+	  }
+        incr count
+
+    }
+	if {$havecoords} {
+		list $xmin $ymin $zmin $xmax $ymax $zmax
+	} else {
+		list
+	}
+}
+
+
+

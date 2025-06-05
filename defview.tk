@@ -1,0 +1,188 @@
+
+#
+# (c) Philip Quaife 2005
+#
+# Routines to make a default view window
+#
+#
+#
+
+proc /setupdefaults {path} {
+
+	# create default display
+
+	puts "Create view for $scene / $togl"
+	$path/togl makecurrent
+	glNewList [~ $path ClearDisplay] GL_COMPILE
+    glClear [expr $::GL_COLOR_BUFFER_BIT | $::GL_DEPTH_BUFFER_BIT]
+	glEndList
+
+	glNewList [~ $path ModelView] GL_COMPILE_AND_EXECUTE
+      glMatrixMode GL_MODELVIEW
+      glLoadIdentity
+	glEndList
+	set Scene(ModelViewMatrix) [glGetm GL_MODELVIEW_MATRIX]
+
+	glNewList [~= $path DefaultOptions] GL_COMPILE_AND_EXECUTE 
+     glEnable GL_LIGHT0
+     glEnable GL_CULL_FACE
+     glEnable GL_DEPTH_TEST
+     glDisable GL_COLOR_MATERIAL
+ 	 glShadeModel GL_SMOOTH
+	 glEnable GL_AUTO_NORMAL
+ 	 glLineWidth 1
+	glEndList
+
+	glNewList [~ $path Background] GL_COMPILE
+		glDepthMask GL_FALSE
+		glBegin GL_LINES
+		  glColor3f  1 1 1
+		  glVertex3f  0 -1 0
+		  glVertex3f  0 1 0
+		  glVertex3f  -1 0 0
+		  glVertex3f  1 0 0
+		glEnd
+		glDepthMask GL_TRUE
+	glEndList
+
+	glNewList [~ Underlay] GL_COMPILE
+		glDisable GL_LIGHTING
+		glBegin GL_LINES
+		glColor3f  1 0 0
+		glVertex3f 0 0 1000
+		glVertex3f 0 0 -1000
+		glColor3f  0 1 0
+		glVertex3f -1000 0 0
+		glVertex3f 1000 0 0
+		glColor3f  0 0 1
+		glVertex3f 0 -1000 0
+		glVertex3f 0 1000 0
+		glEnd
+	glEndList
+
+    glNewList [~= TestRotate] GL_COMPILE
+	glEndList
+    glNewList [~= TestAntiRotate] GL_COMPILE
+	glEndList
+    glNewList [~= TestAlpha] GL_COMPILE
+	glEndList
+
+	glNewList [~ Objects] GL_COMPILE
+		glCallList [$scene ~ EyePosition]
+		glEnable GL_LIGHTING
+	    glMaterialfv GL_FRONT GL_AMBIENT_AND_DIFFUSE {1 0 0}
+		glutSolidCube 1
+		glTranslatef 1 1 -1
+	    glMaterialfv GL_FRONT GL_AMBIENT_AND_DIFFUSE { 0 1 0}
+		glutSolidSphere 1 20 20
+		glTranslatef 1 1 -1
+	    glMaterialfv GL_FRONT GL_AMBIENT_AND_DIFFUSE {0 0.5 1}
+		glPushMatrix
+		glCallList [$scene ~ TestRotate]
+		glFrontFace GL_CW
+		glutSolidTeapot 1
+		glFrontFace GL_CCW
+		glPopMatrix
+	
+		glEnable GL_LIGHTING
+
+		glDisable GL_LIGHTING
+		glLineWidth 10
+		glBegin GL_LINES
+			glVertex3f -50 0 -50
+			glVertex3f -50 0  50
+
+			glVertex3f -50 0 -50
+			glVertex3f 50 0 -50
+
+			glVertex3f -50 0 50
+			glVertex3f 50 0  50
+
+			glVertex3f 50 0 -50
+			glVertex3f 50 0  50
+
+		glEnd
+		glLineWidth 2
+	glEndList
+
+
+}
+
+
+proc TestRotate {after togl list list2 period vector} {
+	variable $togl/togl
+	upvar 0 $togl Scene
+
+	set scene $Scene(Scene)
+
+	set pct [expr {360.0 * ([clock clicks -milli] % $period) / $period}]
+	#puts "test r $pct $vector"
+	$togl/togl makecurrent
+	glNewList $list GL_COMPILE
+		eval glRotatef $pct $vector
+	glEndList
+	glNewList $list2 GL_COMPILE
+		eval glRotatef [expr {-$pct}] $vector
+	glEndList
+	set Scene(test) [after $after [list TestRotate $after $togl $list $list2 $period $vector]]
+	$togl postredisplay
+	list
+}
+
+proc TestAlpha {after togl list period vector} {
+	variable $togl/togl
+	upvar 0 $togl Scene
+
+	set scene $Scene(Scene)
+
+	set pct [expr {([clock clicks -milli] % $period) / double($period/2.0)}]
+	if {$pct > 1.0} {set pct [expr {2.0 - $pct}] }
+	glNewList $list GL_COMPILE
+		glMaterialfv GL_FRONT GL_AMBIENT_AND_DIFFUSE [concat $vector $pct]
+	glEndList
+	set Scene(alpha) [after $after [list TestAlpha $after $togl $list $period $vector]]
+#	$togl postredisplay
+	list
+}
+
+
+proc test/start {togl after period} {
+	variable $togl
+	upvar 0 $togl Scene
+
+	test/stop $togl
+	TestRotate $after $togl [$Scene(Scene) ~ TestRotate] [$Scene(Scene) ~ TestAntiRotate]   $period {0 1 0}
+}
+
+
+proc test/stop {togl} {
+	variable $togl
+	upvar 0 $togl Scene
+
+	catch {after cancel $Scene(test) }
+	list
+}
+
+proc alpha/start {togl after period} {
+	variable $togl
+	upvar 0 $togl Scene
+
+	alpha/stop $togl
+	TestAlpha $after $togl [$Scene(Scene) ~ TestAlpha]  $period {0 1 0}
+}
+
+
+proc alpha/stop {togl} {
+	variable $togl
+	upvar 0 $togl Scene
+
+	catch {after cancel $Scene(alpha) }
+	list
+}
+
+
+
+
+
+
+

@@ -1,0 +1,39 @@
+
+#
+# © Philip Quaife 2007
+#
+# Routines to make Textured text quads
+#
+# QCanvas2d - FTGl Font routines
+#
+
+## FIX ME: Make like loadtexfont and include  otf and type1 fonts
+
+proc //loadfont-ttf {path fontname fontsize fontface} {
+
+	set fontfile [string tolower $fontname-$fontface.ttf]
+	set file [fontfile $path $fontfile]
+	if {$file eq {}} {return {}}
+
+	upvar [nc]::$path/$fontname-$fontface-$fontsize font
+	upvar [nc]::font/$fontfile gblfont
+
+	if {[info exists font(hdr,id)]} {
+	 puts "Cached $fontname-$fontsize-$fontface"
+	 return $font(hdr,id)
+	}
+	if {! [info exists gblfont(hdr,id)]} {
+	 puts "Loading ftgl $fontfile"
+	 set gblfont(fontfile) $fontfile
+	 set gblfont(hdr,master) [nc]::font/$fontfile
+	}
+	array set font [array get gblfont hdr,*]
+	set font(hdr,fontsize) $fontsize
+	set font(hdr,fontface) $fontface
+	set font(hdr,fontname) $fontname
+	set font(hdr,scale) [expr {$fontsize / 72.0 * [winfo fpixels $path 1i] / $font(hdr,maxh)}]
+	return $font(hdr,id)
+
+}
+
+

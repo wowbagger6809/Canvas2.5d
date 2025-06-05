@@ -1,0 +1,114 @@
+#
+# (c) Philip Quaife 2005
+#
+# Utility Routines 
+#
+#
+# Qanim
+
+set ::PI  3.14159265358979323846
+set ::2PI 6.28318530717958647692
+
+
+proc glGet/ {type len what} {
+	set v [Vector GL$type $len]
+	glGet[expr {$type eq {int} ? "Integer" : "Double"}]v $what $v
+	set x [VectorToList $v $len]
+	$v delete
+	set x
+}
+
+interp alias {} [namespace current]::glGetm {} glGet/ double 16
+interp alias {} [namespace current]::glGeti {} glGet/ int 1
+interp alias {} [namespace current]::glGetf {} glGet/ double 1
+
+
+ proc range {a b} {
+	set i $a
+	while {$i <= $b} {lappend r $i ; incr i}
+	set r
+ }
+
+
+proc vTrace {var cmd} {
+	set tcmd "$cmd ;#"
+	trace remove variable $var write $tcmd
+	trace add variable $var write $tcmd
+}
+
+
+proc xprod {x1 y1 z1 x2 y2 z2} {
+ list [expr {$y1*$z2 - $y2*$z1}] \
+              [expr {$z1*$x2 - $z2*$x1}] \
+              [expr {$x1*$y2 - $x2*$y1}]
+}
+
+proc cnorm {x1 y1 z1 x2 y2 z2 x3 y3 z3 args} {
+ normal [xprod [expr {$x2- $x1}] \
+      [expr {$y2 - $y1 }] \
+      [expr {$z2 - $z1}] \
+	  [expr {$x3- $x2}] \
+      [expr {$y3 - $y2 }] \
+      [expr {$z3 - $z2}] ]
+}
+
+proc cnormv {v1 v2 v3} {
+	foreach {x1 y1 z1} $v1 {x2 y2 z2} $v2 {x3 y3 z3} $v3  {break}
+ normal [xprod [expr {$x2- $x1}] \
+      [expr {$y2 - $y1 }] \
+      [expr {$z2 - $z1}] \
+	  [expr {$x3- $x2}] \
+      [expr {$y3 - $y2 }] \
+      [expr {$z3 - $z2}] ]
+}
+
+proc cnormvv {v} {
+	foreach {x1 y1 z1 x2 y2 z2 x3 y3 z3} $v  {break}
+ normal [xprod [expr {$x2- $x1}] \
+      [expr {$y2 - $y1 }] \
+      [expr {$z2 - $z1}] \
+	  [expr {$x3- $x2}] \
+      [expr {$y3 - $y2 }] \
+      [expr {$z3 - $z2}] ]
+}
+
+
+proc cnormr {x3 y3 z3 x2 y2 z2 x1 y1 z1 args} {
+ normal [xprod [expr {$x2- $x1}] \
+      [expr {$y2 - $y1 }] \
+      [expr {$z2 - $z1}] \
+	  [expr {$x3- $x2}] \
+      [expr {$y3 - $y2 }] \
+      [expr {$z3 - $z2}] ]
+}
+
+
+proc normal {args} {
+
+	set max 0
+
+	foreach v [set args [join $args]] {
+		set  max [expr {$max + $v*$v}]
+	}
+	if {$max == 0} {set scale 1 ; lset args 0 1.0} else {
+	    set scale [expr {1.0 / sqrt($max)}]
+	}
+	foreach v $args {
+		lappend norm [expr {$v * $scale}]
+	}
+	set norm
+}
+
+
+proc lRev {l} {
+	set ret [list]
+
+	foreach i $l {
+		set ret [concat $i $ret]
+	}
+	set ret
+}
+
+
+
+
